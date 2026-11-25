@@ -1,22 +1,16 @@
 # Product analytics
 
-The server owns analytics delivery, opt-out, and identity for every connected client. Clients never
-load the PostHog browser SDK, PostHog person profiles stay disabled, and visiting hosted web without
-an authenticated connection does not count as product use.
+The server owns product analytics delivery. In this customized build analytics are opt-in and
+disabled by default (`T3CODE_TELEMETRY_ENABLED=true` is required). Clients never load the PostHog
+browser SDK, PostHog person profiles stay disabled, and visiting hosted web without an authenticated
+connection does not count as product use.
 
 ## Identity
 
-- **`distinct_id` is the install id.** Both are the hash of a random id persisted in the state
-  directory. Events carry it under both names because older builds derived `distinct_id` from the
-  Codex or Claude sign-in files, so the ingest side counts installs by `installId`.
-- **Identity never comes from a provider.** Do not read a provider's sign-in files or derive an id
-  or owner from a user's OpenAI, Claude, or other provider account, even hashed: users did not sign
-  in to those to be identified by T3 Code.
-- **Resolve owners at query time.** `install.owner_observed` links installs to owners (Connect
-  account, client device). Two Connect accounts are never merged as one person.
-- **Hash everywhere with [one helper](../../packages/shared/src/telemetryId.ts).** Clients and
-  servers hash with the same SHA-256 helper so IDs correlate; the server accepts only hashes from
-  clients.
+- When explicitly enabled, `distinct_id`/`installId` is derived from a random installation id.
+  The identity file is not read or created while analytics are off.
+- No T3 Connect, Codex, Claude, provider-account, or client-device identity is read or attached to
+  analytics. Connection URLs carry descriptive client metadata only, not account or device hashes.
 
 ## Attribution boundaries
 
@@ -42,5 +36,5 @@ an authenticated connection does not count as product use.
 - Delivery ([`AnalyticsService.ts`](../../apps/server/src/telemetry/AnalyticsService.ts)) attaches a
   UUID per event, backs off on failure, and drops batches after bounded retries so a stuck batch
   cannot loop forever.
-- Dev-runner servers and CI smoke tests disable telemetry (and relay tracing) by default so they do
-  not inflate install counts; set `T3CODE_TELEMETRY_ENABLED=true` to test locally.
+- Product analytics and relay tracing default to off in this customized build; explicitly set
+  `T3CODE_TELEMETRY_ENABLED=true` to opt in.

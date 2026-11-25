@@ -154,9 +154,9 @@ export interface Preferences {
   readonly codeFontSize?: number | null;
   readonly codeWordBreak?: boolean;
   readonly mathRenderingEnabled?: boolean;
-  /** Unset means on: crash reports are sent unless the user turns them off. */
+  /** Crash reports are sent only when explicitly enabled. */
   readonly crashReportsEnabled?: boolean;
-  /** Unset means on: connection traces are sent unless the user turns them off. */
+  /** Connection traces are sent only when explicitly enabled. */
   readonly connectionTracesEnabled?: boolean;
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];

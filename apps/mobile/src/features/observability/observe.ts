@@ -43,9 +43,11 @@ export async function setCrashReportsEnabled(enabled: boolean) {
 if (!crashReportingAvailable) {
   void setCrashReportsEnabled(false);
 } else {
+  // Fail closed before loading preferences so a previous default-on setting cannot send reports.
+  void setCrashReportsEnabled(false);
   // Observe keeps its last configuration across launches; configuring it off while the setting
-  // loads would drop the last session's native crash. Imported lazily so the persistence graph
-  // never runs ahead of the imports `index.ts` orders first.
+  // loads is required because reporting must be an explicit opt-in. Imported lazily so the
+  // persistence graph never runs ahead of the imports `index.ts` orders first.
   const changedSinceLoad = () => latestConfiguration !== 0;
   void import("../../persistence/imperative")
     .then(({ loadPreferences }) => loadPreferences())
@@ -53,7 +55,7 @@ if (!crashReportingAvailable) {
       (preferences) =>
         changedSinceLoad()
           ? undefined
-          : setCrashReportsEnabled(preferences.crashReportsEnabled !== false),
+          : setCrashReportsEnabled(preferences.crashReportsEnabled === true),
       // Observe keeps the last choice it was given, which stands in for the unreadable one.
       (error: unknown) => console.warn("[observe] could not read the crash report setting", error),
     )

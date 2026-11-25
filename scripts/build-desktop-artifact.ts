@@ -78,6 +78,7 @@ const WorkspaceConfig = Schema.Struct({
 type WorkspaceConfig = typeof WorkspaceConfig.Type;
 
 const StageWorkspaceConfig = Schema.Struct({
+  packages: Schema.Array(Schema.String),
   supportedArchitectures: Schema.Struct({
     os: Schema.Array(Schema.String),
     cpu: Schema.Array(Schema.String),
@@ -1608,6 +1609,7 @@ export function createStageWorkspaceConfig(input: {
         };
 
   return {
+    packages: [],
     supportedArchitectures,
     ...(allowBuilds && Object.keys(allowBuilds).length > 0 ? { allowBuilds } : {}),
     ...(patchedDependencies && Object.keys(patchedDependencies).length > 0

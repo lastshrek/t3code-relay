@@ -6,6 +6,10 @@ import { draftSupportedRuntimeModes } from "./chat/runtimeModeConfig";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  resolveActiveModelProfile,
+  resolvePhaseModelSelection,
+} from "@t3tools/shared/modelProfiles";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
@@ -641,6 +645,9 @@ export default function ChatView(props: ChatViewProps) {
   const { resolvedTheme } = useTheme();
   const composerRuntimeMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.runtimeMode ?? null,
+  );
+  const composerInteractionMode = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
   );
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
@@ -2746,6 +2753,54 @@ export default function ChatView(props: ChatViewProps) {
     );
     return item ? [item] : [];
   });
+  // When a model profile is active, offer a one-click continuation on the next
+  // usable model in the same phase instead of waiting for the quota to reset.
+  const recoveryProfile = resolveActiveModelProfile(settings, settings.activeModelProfileId);
+  const recoveryPhase = activeThreadShell?.interactionMode === "plan" ? "think" : "execute";
+  const recoveryFallback = recoveryProfile
+    ? resolvePhaseModelSelection({
+        profile: recoveryProfile,
+        phase: recoveryPhase,
+        providers: providerStatuses,
+        now: Date.parse(`${nowMinute}:00.000Z`),
+        settings,
+        projectId: activeThreadShell?.projectId ?? null,
+      })
+    : { selection: null, fellBack: false };
+  const handleRecoverySwitchModel = async () => {
+    const selection = recoveryFallback.selection;
+    if (!selection || !activeThreadShell || !limitRecoveryRun) return;
+    await updateThreadMetadata({
+      environmentId,
+      input: {
+        threadId: activeThreadShell.id,
+        limitRecovery: {
+          runId: limitRecoveryRun.runId,
+          resetAt: serverRuntime?.usageLimitResetAt ?? activeThreadShell.updatedAt,
+          autoResume: false,
+          snooze: false,
+        },
+      },
+    });
+    await startThreadTurn({
+      environmentId,
+      input: {
+        threadId: activeThreadShell.id,
+        manualContinuationOfRunId: limitRecoveryRun.runId,
+        modelSelection: selection,
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          text: "",
+          attachments: [],
+        },
+        runtimeMode: activeThreadShell.runtimeMode,
+        interactionMode: activeThreadShell.interactionMode,
+        dispatchMode: "start",
+      },
+    });
+  };
+
   const limitRecoveryBanner = useUsageLimitRecoveryBannerItem(
     limitRecoveryRun !== null && activeThreadShell !== null
       ? {
@@ -2765,6 +2820,12 @@ export default function ChatView(props: ChatViewProps) {
             });
             if (result._tag === "Failure") throw squashAtomCommandFailure(result);
           },
+          ...(settings.autoFallbackOnUsageLimit && recoveryFallback.selection
+            ? {
+                fallbackModelLabel: recoveryFallback.selection.model,
+                onSwitchModel: () => void handleRecoverySwitchModel(),
+              }
+            : {}),
         }
       : null,
     messages,
@@ -3143,6 +3204,8 @@ export default function ChatView(props: ChatViewProps) {
     isGitRepo,
     phase,
     runtimeMode,
+    interactionMode:
+      composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
     sendEnvMode,
     worktreeRepositories,
     startFromOrigin,

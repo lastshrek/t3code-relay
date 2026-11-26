@@ -37,6 +37,9 @@ type RecoveryProps = {
   resetPassed?: boolean;
   displayPassed?: boolean;
   onChange: (recovery: OrchestrationV2LimitRecoveryUpdate) => Promise<void>;
+  /** When present, offers a one-click continuation on a different model. */
+  fallbackModelLabel?: string;
+  onSwitchModel?: () => void;
 };
 
 function parseEpochMs(isoDate: string | null): number | null {
@@ -98,6 +101,17 @@ export function usageLimitRecoveryBannerItem(
   const recoveryActions = canSchedule ? (
     <RecoveryActions key={`${runId}:${resetAt}`} {...props} />
   ) : null;
+  const switchModelAction =
+    props.fallbackModelLabel && props.onSwitchModel ? (
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={props.onSwitchModel}
+        title={props.fallbackModelLabel}
+      >
+        {resolve(msg("Use {model}", { model: props.fallbackModelLabel }))}
+      </Button>
+    ) : null;
   const resumesUpcoming = resumes && !displayPassed;
   const shownAt = resumesUpcoming ? displayAt : resetAt;
   const formattedTime = shownAt
@@ -119,7 +133,12 @@ export function usageLimitRecoveryBannerItem(
       icon: <GaugeIcon />,
       title: resolve(msg("Usage limit reached")),
       description: resetDescription,
-      actions: recoveryActions,
+      actions: (
+        <>
+          {switchModelAction}
+          {recoveryActions}
+        </>
+      ),
     };
   }
   // OpenAI's partner guidelines specify this ChatGPT notice and its actions.
@@ -136,6 +155,7 @@ export function usageLimitRecoveryBannerItem(
       : resetDescription,
     actions: (
       <>
+        {switchModelAction}
         {recoveryActions}
         {workspaceLimit ? (
           <Button size="xs" variant="ghost" onClick={copyAdminRequest}>

@@ -330,6 +330,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     environmentOnly: true,
   },
   {
+    id: "model-profiles",
+    title: msg("Model profiles"),
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: [
+      msg(
+        "profile preset thinking planning execution model quota fallback switch fallback on usage limit",
+      ),
+    ],
+  },
+  {
+    id: "auto-fallback-on-usage-limit",
+    title: msg("Offer a fallback model on usage limits"),
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: [msg("automatic quota exhausted switch next model profile continue")],
+  },
+  {
     id: "default-permissions",
     title: msg("Permissions"),
     to: "/settings/threads",

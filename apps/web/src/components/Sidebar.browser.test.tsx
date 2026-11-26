@@ -193,7 +193,7 @@ describe("sidebar project folder with settled threads", () => {
       settledAt: "2026-01-01T00:00:00.000Z",
     });
     vi.mocked(useQuietThreadShells).mockReturnValue([active, settled]);
-    vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "new" });
+    vi.mocked(useThreadRouteTarget).mockReturnValue(null);
 
     await using _screen = await render(
       <SidebarProvider>

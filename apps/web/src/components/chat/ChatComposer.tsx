@@ -32,6 +32,7 @@ import type {
   ModelSelection,
   ProjectId,
   PreviewAnnotationPayload,
+  ProviderInteractionMode,
   ThreadContextRecord,
   EnvironmentContextRecord,
   ResolvedKeybindingsConfig,
@@ -2690,6 +2691,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : composerControlsCollapsed
       ? 0
       : expandedControlsIconOnlyBlockCount;
+  // Optional "model profiles": one click switches the working phase and applies
+  // that phase's first usable model. Without a configured profile nothing changes.
+  const activeModelProfile =
+    settings.modelProfiles?.find((profile) => profile.id === settings.activeModelProfileId) ??
+    undefined;
+  const composerPhase = composerDraft?.interactionMode ?? "default";
+  const handlePhaseChange = useStableCallback((mode: ProviderInteractionMode) => {
+    const store = useComposerDraftStore.getState();
+    store.setInteractionMode(composerDraftTarget, mode);
+    if (!activeModelProfile) return;
+    const list =
+      mode === "plan" ? activeModelProfile.thinkModels : activeModelProfile.executeModels;
+    const selection = list[0];
+    if (selection) {
+      store.setModelSelection(composerDraftTarget, selection, {
+        explicit: true,
+        replaceOptions: true,
+      });
+    }
+  });
+
   const composerControls = (
     <ComposerControlsBar
       environmentId={environmentId}
@@ -2737,6 +2759,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
+      {...(activeModelProfile
+        ? {
+            interactionMode: composerPhase,
+            onInteractionModeChange: handlePhaseChange,
+            activeProfileName: activeModelProfile.name,
+          }
+        : {})}
     />
   );
   // An open question owns the space above the composer. Only a machine problem,

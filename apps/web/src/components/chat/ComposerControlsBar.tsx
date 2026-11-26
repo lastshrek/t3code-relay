@@ -2,7 +2,7 @@ import type { ChatComposerProps } from "./ChatComposer";
 import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
-import { useGT, useMessages } from "gt-react";
+import { T, useGT, useMessages } from "gt-react";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerControl } from "./ComposerControl";
@@ -16,6 +16,7 @@ import {
   type ModelSelection,
   type ProviderDriverKind,
   type ProviderInstanceId,
+  type ProviderInteractionMode,
   type RuntimeMode,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -39,6 +40,40 @@ import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
  */
 // Model and effort share one trigger; it stays filled while its popup is open.
 const MODEL_TRIGGER_STATES = "data-popup-open:bg-accent data-popup-open:text-foreground";
+
+function ComposerPhaseControl({
+  mode,
+  profileName,
+  onChange,
+}: {
+  readonly mode: ProviderInteractionMode;
+  readonly profileName: string | undefined;
+  readonly onChange: (mode: ProviderInteractionMode) => void;
+}) {
+  const gt = useGT();
+  const thinking = mode === "plan";
+  return (
+    <button
+      type="button"
+      aria-label={
+        thinking
+          ? gt("Thinking phase, switch to execution")
+          : gt("Execution phase, switch to thinking")
+      }
+      onClick={() => onChange(thinking ? "default" : "plan")}
+      className={cn(
+        "flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium outline-none",
+        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        thinking
+          ? "bg-accent text-foreground"
+          : "border border-border/60 text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {thinking ? <T>Think</T> : <T>Execute</T>}
+      {profileName ? <span className="max-w-12 truncate opacity-60">{profileName}</span> : null}
+    </button>
+  );
+}
 
 export function ComposerControlsBar(props: {
   environmentId: EnvironmentId;
@@ -87,6 +122,10 @@ export function ComposerControlsBar(props: {
   onModelPickerOpenChange: (open: boolean) => void;
   modelPickerIconClassName: string | undefined;
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
+  /** Thinking/execution phase. Present when at least one model profile is configured. */
+  interactionMode?: ProviderInteractionMode;
+  onInteractionModeChange?: (mode: ProviderInteractionMode) => void;
+  activeProfileName?: string;
 }) {
   const {
     environmentId,
@@ -165,24 +204,40 @@ export function ComposerControlsBar(props: {
     onPromptEdit,
   });
   const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize, m);
-  const restingBlockDefs = showModeBlock
-    ? [
-        {
-          id: "mode",
-          content: (
-            <ComposerFooterModeControls
-              runtimeMode={compatibleRuntimeMode}
-              runtimeModeOptions={compatibleRuntimeModeOptions}
-              size={controlSize}
-              hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-              accessDisplay={accessDisplay}
-              emphasized={!accessMatchesDefault}
-              onRuntimeModeChange={handleRuntimeModeChange}
-            />
-          ),
-        },
-      ]
-    : [];
+  const restingBlockDefs = [
+    ...(showModeBlock
+      ? [
+          {
+            id: "mode",
+            content: (
+              <ComposerFooterModeControls
+                runtimeMode={compatibleRuntimeMode}
+                runtimeModeOptions={compatibleRuntimeModeOptions}
+                size={controlSize}
+                hidden={composerControlsHidden || restingHiddenBlockCount > 0}
+                accessDisplay={accessDisplay}
+                emphasized={!accessMatchesDefault}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            ),
+          },
+        ]
+      : []),
+    ...(props.interactionMode && props.onInteractionModeChange
+      ? [
+          {
+            id: "phase",
+            content: (
+              <ComposerPhaseControl
+                mode={props.interactionMode}
+                profileName={props.activeProfileName}
+                onChange={props.onInteractionModeChange}
+              />
+            ),
+          },
+        ]
+      : []),
+  ];
   // Its own element, so typing (which rebuilds the controls around it) leaves it cached.
   const composerModelPicker = (
     <ComposerModelPicker

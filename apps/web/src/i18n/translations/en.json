@@ -8927,7 +8927,7 @@
   "93c4c53562d30a98": "When you ask, agents show you a short report about T3 Code and send it to the T3 team if you approve.",
   "cd9ee803e8727017": "Agents also report T3 Code problems they hit on their own, such as a T3 tool that failed.",
   "45fa271ea0e1ac8e": "Beta",
-  "3a678332fc7142f7": "Group sidebar threads into project folders. Pinned threads stay on top, and Snoozed and Settled stay below the folders.",
+  "f308153ab99b5f20": "Group sidebar threads into project folders. Pinned threads stay on top, settled threads stay inside their folder, and Snoozed stays below.",
   "e4e91d155cb6a9b4": "Boring sidebar (group by project)",
   "f079556d67367fe7": "Show folder threads on two lines: the title, then the branch, pull request, and agent.",
   "ac1e5c94d1ad3c6a": "Two-line folder rows",

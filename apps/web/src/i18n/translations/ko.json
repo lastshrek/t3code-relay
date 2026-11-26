@@ -8877,7 +8877,7 @@
   "93c4c53562d30a98": "요청하면 에이전트가 T3 Code에 관한 짧은 보고서를 보여주고, 승인하면 T3 팀에 보냅니다.",
   "cd9ee803e8727017": "에이전트가 직접 겪은 T3 Code 문제도 보고합니다. 예를 들어 T3 도구가 실패한 경우입니다.",
   "45fa271ea0e1ac8e": "베타",
-  "3a678332fc7142f7": "사이드바 스레드를 프로젝트 폴더로 묶습니다. 고정된 스레드는 맨 위에, 다시 알림과 정리됨은 폴더 아래에 유지됩니다.",
+  "f308153ab99b5f20": "Group sidebar threads into project folders. Pinned threads stay on top, settled threads stay inside their folder, and Snoozed stays below.",
   "e4e91d155cb6a9b4": "단순 사이드바(프로젝트별 그룹화)",
   "f079556d67367fe7": "폴더 스레드를 두 줄로 표시합니다. 첫 줄은 제목, 둘째 줄은 브랜치, 풀 리퀘스트, 에이전트입니다.",
   "ac1e5c94d1ad3c6a": "두 줄 폴더 행",

@@ -158,6 +158,57 @@ describe("sidebar header new thread", () => {
   });
 });
 
+describe("sidebar project folder with settled threads", () => {
+  it("shows settled threads inside their project folder, not in a standalone shelf", async () => {
+    using stack = new DisposableStack();
+    const previousSettings = getClientSettings();
+    stack.defer(() => __setClientSettingsForTests(previousSettings));
+    __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, boringSidebarEnabled: true });
+    const environmentId = EnvironmentId.make("local");
+    const demo = project("demo");
+    vi.mocked(useProjects).mockReturnValue([demo]);
+    vi.mocked(useConnectedEnvironmentIds).mockReturnValue([environmentId]);
+    vi.mocked(usePrimaryEnvironmentId).mockReturnValue(environmentId);
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: { environmentId, projectId: demo.id },
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef: null,
+    });
+    const active = makeThreadFixture({
+      environmentId,
+      id: ThreadId.make("active-thread"),
+      projectId: demo.id,
+      title: "Active work",
+    });
+    const settled = makeThreadFixture({
+      environmentId,
+      id: ThreadId.make("settled-thread"),
+      projectId: demo.id,
+      title: "Settled work",
+      settledOverride: "settled",
+      settledAt: "2026-01-01T00:00:00.000Z",
+    });
+    vi.mocked(useQuietThreadShells).mockReturnValue([active, settled]);
+    vi.mocked(useThreadRouteTarget).mockReturnValue({ kind: "new" });
+
+    await using _screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+
+    const folderRows = [...document.querySelectorAll('[data-testid="sidebar-row-folder"]')];
+    expect(folderRows.some((row) => row.textContent?.includes("Active work"))).toBe(true);
+    expect(folderRows.some((row) => row.textContent?.includes("Settled work"))).toBe(true);
+    // No standalone Settled shelf header when all settled threads found a folder.
+    expect([...document.querySelectorAll('[data-sidebar-row="shelf:settled"]')]).toHaveLength(0);
+  });
+});
+
 // regression: #41549 a grouped project's folder New thread went to the primary copy
 describe("sidebar project folder new thread", () => {
   it("starts in the copy of the viewed thread, as the new-thread shortcut does", async () => {

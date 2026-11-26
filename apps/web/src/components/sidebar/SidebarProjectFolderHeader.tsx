@@ -42,6 +42,8 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
   group: SidebarProjectSnapshot;
   collapsed: boolean;
   hiddenThreads: readonly EnvironmentThreadShell[];
+  /** Threads eligible for the status dot; settled threads are excluded by the caller. */
+  dotThreads?: readonly EnvironmentThreadShell[];
   onToggle: (group: SidebarProjectSnapshot) => void;
   onNewThread: (group: SidebarProjectSnapshot) => void;
   onContextMenu: (
@@ -53,11 +55,12 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
   const gt = useGT();
   const m = useMessages();
   const { group, collapsed, hiddenThreads } = props;
+  const dotThreads = props.dotThreads ?? hiddenThreads;
   const rowId = sidebarFolderRowId(group.projectKey);
   const localLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
   const dot = collapsed
     ? resolveSidebarFolderDot(
-        hiddenThreads.map((thread) => ({
+        dotThreads.map((thread) => ({
           ...thread,
           lastVisitedAt: resolveThreadLastVisitedAt(
             thread.lastVisitedAt,

@@ -1019,9 +1019,14 @@ it.effect("repeated imports reach linked-worktree sessions behind the scan budge
                   driver: ProviderDriverKind.make("codex"),
                   config: { homePath: codexHome },
                 },
-                // Keeps the default Pi instance off the developer's real ~/.pi.
+                // Keeps the default Pi and OpenCode instances off the developer's real data dirs.
                 [ProviderInstanceId.make("pi")]: {
                   driver: ProviderDriverKind.make("pi"),
+                  enabled: false,
+                  config: {},
+                },
+                [ProviderInstanceId.make("opencode")]: {
+                  driver: ProviderDriverKind.make("opencode"),
                   enabled: false,
                   config: {},
                 },
@@ -1049,5 +1054,47 @@ it.effect("repeated imports reach linked-worktree sessions behind the scan budge
       ),
     );
     expect(oldest.worktreePath).toBe(worktree);
+  }).pipe(Effect.scoped, Effect.provide(Layer.merge(persistence, NodeServices.layer))),
+);
+
+it.effect("imports OpenCode threads with native session bindings and model selection", () =>
+  Effect.gen(function* () {
+    const openCodeSelection = {
+      instanceId: ProviderInstanceId.make("opencode"),
+      model: "opencode/hy4-flash-free",
+    };
+    const item = {
+      ...candidate(openCodeSelection, "ses_opencode_1", "opencode"),
+      source: {
+        ...candidate(openCodeSelection, "ses_opencode_1", "opencode").source,
+        filePath: "/tmp/opencode/opencode.db#ses_opencode_1",
+        size: 0,
+      },
+    };
+    const importer = yield* makeImporter([item]);
+    expect(yield* importer.run).toEqual({ importedCount: 1, skippedCount: 0 });
+
+    const threadId = importId(item);
+    const records = yield* ProjectionStore.ProjectionStoreV2.pipe(
+      Effect.flatMap((projections) =>
+        projections.getThreadRecords(threadId, ["messages", "providerThreads"]),
+      ),
+    );
+    expect(records.thread.providerInstanceId).toBe(openCodeSelection.instanceId);
+    expect(records.thread.modelSelection).toEqual(openCodeSelection);
+    expect(records.providerThreads[0]?.driver).toBe(ProviderDriverKind.make("opencode"));
+    expect(records.providerThreads[0]?.nativeThreadRef).toEqual({
+      driver: ProviderDriverKind.make("opencode"),
+      nativeId: "ses_opencode_1",
+      strength: "strong",
+    });
+    expect(records.messages.map((message) => `${message.role}:${message.text}`)).toEqual([
+      "user:Fix it",
+      "assistant:Fixed",
+    ]);
+    const runtime = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository.pipe(
+      Effect.flatMap((repository) => repository.getByThreadId({ threadId })),
+    );
+    expect(Option.getOrUndefined(runtime)?.resumeCursor).toEqual({ threadId: "ses_opencode_1" });
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(persistence, NodeServices.layer))),
 );

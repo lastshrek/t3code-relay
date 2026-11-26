@@ -59,6 +59,7 @@ interface ScannerTestInput {
   readonly claudeHomePath: string;
   readonly codexHomePath: string;
   readonly piAgentDir?: string;
+  readonly openCodeDataDir?: string;
   readonly importedWorkspaceRoots?: ReadonlyArray<string>;
   readonly configBaseDir?: string;
   readonly providerInstances?: ContractServerSettings["providerInstances"];
@@ -119,6 +120,20 @@ const layerScannerTest = (input: ScannerTestInput) =>
                   sensitive: false,
                 },
                 { name: "PI_CODING_AGENT_SESSION_DIR", value: "", sensitive: false },
+              ],
+              config: {},
+            },
+            // Keeps the default OpenCode instance off the developer's real ~/.local/share/opencode.
+            [ProviderInstanceId.make("opencode")]: {
+              driver: ProviderDriverKind.make("opencode"),
+              enabled: input.openCodeDataDir !== undefined,
+              environment: [
+                {
+                  name: "OPENCODE_DATA_DIR",
+                  value: input.openCodeDataDir ?? `${input.claudeHomePath}/opencode-data`,
+                  sensitive: false,
+                },
+                { name: "OPENCODE_DB", value: "", sensitive: false },
               ],
               config: {},
             },
@@ -3441,6 +3456,341 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     );
   },
 );
+
+describe("opencode", () => {
+  const createOpenCodeFixtureDb = (
+    dbPath: string,
+    setup: (db: NodeSqlite.DatabaseSync) => void,
+  ) => {
+    const db = new NodeSqlite.DatabaseSync(dbPath);
+    try {
+      db.exec(`
+        CREATE TABLE session_v2 (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          parent_id TEXT,
+          slug TEXT NOT NULL,
+          directory TEXT NOT NULL,
+          title TEXT,
+          version TEXT NOT NULL,
+          model TEXT,
+          time_created INTEGER NOT NULL,
+          time_updated INTEGER NOT NULL,
+          time_archived INTEGER
+        );
+        CREATE TABLE session_message (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          seq INTEGER NOT NULL,
+          time_created INTEGER NOT NULL,
+          time_updated INTEGER NOT NULL,
+          data TEXT NOT NULL
+        );
+        CREATE TABLE session_part (
+          message_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          time_created INTEGER NOT NULL,
+          time_updated INTEGER NOT NULL,
+          data TEXT NOT NULL,
+          PRIMARY KEY (message_id, ordinal)
+        );
+        CREATE TABLE session (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          parent_id TEXT,
+          slug TEXT NOT NULL,
+          directory TEXT NOT NULL,
+          title TEXT NOT NULL,
+          version TEXT NOT NULL,
+          time_created INTEGER NOT NULL,
+          time_updated INTEGER NOT NULL,
+          time_archived INTEGER
+        );
+        CREATE TABLE message (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          time_created INTEGER NOT NULL,
+          time_updated INTEGER NOT NULL,
+          data TEXT NOT NULL
+        );
+        CREATE TABLE part (
+          id TEXT PRIMARY KEY,
+          message_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          time_created INTEGER NOT NULL,
+          time_updated INTEGER NOT NULL,
+          data TEXT NOT NULL
+        );
+      `);
+      setup(db);
+    } finally {
+      db.close();
+    }
+  };
+
+  it.effect(
+    "scans and imports OpenCode v2.4 parts, v2 inline content, and v1 sessions while filtering subagents, archived, and duplicate IDs",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const nowMs = Date.parse("2026-08-25T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const root = yield* makeTempDir("t3code-opencode-scan-");
+        const workspace = path.join(root, "repo");
+        const claudeHomePath = path.join(root, "claude");
+        const codexHomePath = path.join(root, "codex");
+        const openCodeDataDir = path.join(root, "opencode");
+        yield* fileSystem.makeDirectory(workspace, { recursive: true });
+        yield* fileSystem.makeDirectory(openCodeDataDir, { recursive: true });
+
+        const dbPath = path.join(openCodeDataDir, "opencode.db");
+        createOpenCodeFixtureDb(dbPath, (db) => {
+          const insertV2 = db.prepare(
+            `INSERT INTO session_v2 (id, project_id, parent_id, slug, directory, title, version, model, time_created, time_updated, time_archived)
+             VALUES (?, 'proj', ?, 'slug', ?, ?, ?, ?, ?, ?, ?)`,
+          );
+          const insertV2Msg = db.prepare(
+            `INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          );
+          const insertV2Part = db.prepare(
+            `INSERT INTO session_part (message_id, session_id, ordinal, type, time_created, time_updated, data)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          );
+          const insertV1 = db.prepare(
+            `INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived)
+             VALUES (?, 'proj', ?, 'slug', ?, ?, '1.18.0', ?, ?, ?)`,
+          );
+          const insertV1Msg = db.prepare(
+            `INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)`,
+          );
+          const insertV1Part = db.prepare(
+            `INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)`,
+          );
+
+          // 1. OpenCode v2.4 session using session_part for assistant text.
+          const t1 = nowMs - 60_000;
+          insertV2.run(
+            "ses_v24",
+            null,
+            workspace,
+            "v2.4 title",
+            "2.4.2",
+            JSON.stringify({ providerID: "opencode", id: "hy4-flash-free" }),
+            t1 - 10_000,
+            t1,
+            null,
+          );
+          insertV2Msg.run(
+            "m_v24_u",
+            "ses_v24",
+            "user",
+            1,
+            t1 - 5_000,
+            t1 - 5_000,
+            JSON.stringify({ text: "Check welcome scan", time: { created: t1 - 5_000 } }),
+          );
+          insertV2Msg.run(
+            "m_v24_a",
+            "ses_v24",
+            "assistant",
+            2,
+            t1,
+            t1,
+            JSON.stringify({
+              content: [],
+              model: { providerID: "opencode", id: "hy4-flash-free", variant: "high" },
+              time: { created: t1 },
+            }),
+          );
+          insertV2Part.run(
+            "m_v24_a",
+            "ses_v24",
+            0,
+            "reasoning",
+            t1,
+            t1,
+            JSON.stringify({ type: "reasoning", text: "hidden thinking" }),
+          );
+          insertV2Part.run(
+            "m_v24_a",
+            "ses_v24",
+            1,
+            "text",
+            t1,
+            t1,
+            JSON.stringify({ type: "text", text: "Found OpenCode SQLite sessions." }),
+          );
+
+          // 2. Migrated v2 session with inline content AND duplicate row in v1 session table.
+          const t2 = nowMs - 120_000;
+          insertV2.run(
+            "ses_v2_inline",
+            null,
+            workspace,
+            "",
+            "2.0.0",
+            JSON.stringify({ providerID: "go", id: "glm-5.1" }),
+            t2 - 10_000,
+            t2,
+            null,
+          );
+          insertV1.run("ses_v2_inline", null, workspace, "Old duplicate", t2 - 10_000, t2, null);
+          insertV2Msg.run(
+            "m_inline_u",
+            "ses_v2_inline",
+            "user",
+            1,
+            t2 - 5_000,
+            t2 - 5_000,
+            JSON.stringify({ text: "Derive title from prompt" }),
+          );
+          insertV2Msg.run(
+            "m_inline_a",
+            "ses_v2_inline",
+            "assistant",
+            2,
+            t2,
+            t2,
+            JSON.stringify({
+              content: [{ type: "text", text: "Inline assistant reply" }],
+            }),
+          );
+
+          // 3. v1-only session stored only in legacy session/message/part tables.
+          const t3 = nowMs - 180_000;
+          insertV1.run("ses_v1_only", null, workspace, "Legacy v1 thread", t3 - 10_000, t3, null);
+          insertV1Msg.run(
+            "m_v1_u",
+            "ses_v1_only",
+            t3 - 5_000,
+            t3 - 5_000,
+            JSON.stringify({ role: "user", time: { created: t3 - 5_000 } }),
+          );
+          insertV1Part.run(
+            "p_v1_u",
+            "m_v1_u",
+            "ses_v1_only",
+            t3 - 5_000,
+            t3 - 5_000,
+            JSON.stringify({ type: "text", text: "Legacy prompt" }),
+          );
+          insertV1Msg.run(
+            "m_v1_a",
+            "ses_v1_only",
+            t3,
+            t3,
+            JSON.stringify({
+              role: "assistant",
+              providerID: "opencode",
+              modelID: "big-pickle",
+              time: { created: t3 },
+            }),
+          );
+          insertV1Part.run(
+            "p_v1_a_syn",
+            "m_v1_a",
+            "ses_v1_only",
+            t3,
+            t3,
+            JSON.stringify({ type: "text", synthetic: true, text: "ignored synthetic" }),
+          );
+          insertV1Part.run(
+            "p_v1_a",
+            "m_v1_a",
+            "ses_v1_only",
+            t3,
+            t3,
+            JSON.stringify({ type: "text", text: "Legacy reply" }),
+          );
+
+          // 4. Excluded: subagent (parent_id set) and archived (time_archived set).
+          insertV2.run(
+            "ses_subagent",
+            "ses_v24",
+            workspace,
+            "Subagent",
+            "2.4.2",
+            null,
+            t1,
+            t1,
+            null,
+          );
+          insertV2.run("ses_archived", null, workspace, "Archived", "2.4.2", null, t1, t1, t1);
+        });
+
+        const scanResult = yield* runScan({ claudeHomePath, codexHomePath, openCodeDataDir });
+        expect(scanResult.candidates).toHaveLength(1);
+        expect(scanResult.candidates[0]).toMatchObject({
+          path: workspace,
+          sources: ["opencode"],
+          threadCount: 3,
+        });
+
+        const outcomes = yield* runRecentThreadOutcomes({
+          claudeHomePath,
+          codexHomePath,
+          openCodeDataDir,
+          workspaceRoot: workspace,
+        });
+        const importable = outcomes.flatMap((outcome) =>
+          outcome._tag === "Importable" ? [outcome] : [],
+        );
+        expect(importable.map((entry) => entry.thread.providerSessionId)).toEqual([
+          "ses_v24",
+          "ses_v2_inline",
+          "ses_v1_only",
+        ]);
+        expect(importable[0]?.thread).toMatchObject({
+          source: "opencode",
+          title: "v2.4 title",
+          model: "opencode/hy4-flash-free",
+          messages: [
+            { role: "user", text: "Check welcome scan" },
+            { role: "assistant", text: "Found OpenCode SQLite sessions." },
+          ],
+        });
+        expect(importable[1]?.thread).toMatchObject({
+          title: "Derive title from prompt",
+          model: "go/glm-5.1",
+          messages: [
+            { role: "user", text: "Derive title from prompt" },
+            { role: "assistant", text: "Inline assistant reply" },
+          ],
+        });
+        expect(importable[2]?.thread).toMatchObject({
+          title: "Legacy v1 thread",
+          model: "opencode/big-pickle",
+          messages: [
+            { role: "user", text: "Legacy prompt" },
+            { role: "assistant", text: "Legacy reply" },
+          ],
+        });
+
+        // Re-running with completedSources marks unchanged OpenCode sessions as AlreadyImported.
+        const rerun = yield* Effect.gen(function* () {
+          const scanner = yield* AgentSessionScanner.AgentSessionScanner;
+          return yield* scanner
+            .recentThreads(
+              workspace,
+              importable.map((entry) => entry.source),
+            )
+            .pipe(Stream.runCollect, Effect.map(Array.from));
+        }).pipe(
+          Effect.provide(layerScannerTest({ claudeHomePath, codexHomePath, openCodeDataDir })),
+        );
+        expect(rerun.map((outcome) => outcome._tag)).toEqual([
+          "AlreadyImported",
+          "AlreadyImported",
+          "AlreadyImported",
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
 
 describe("parseAgentSessionTranscript", () => {
   it.each([false, true])(

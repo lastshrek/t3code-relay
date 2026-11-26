@@ -70,6 +70,20 @@ class CodexStateReadError extends Schema.TaggedError<CodexStateReadError>()("Cod
     return `Could not read Codex projects from ${this.databasePath}.`;
   }
 }
+
+class OpenCodeStateReadError extends Schema.TaggedError<OpenCodeStateReadError>()(
+  "OpenCodeStateReadError",
+  {
+    databasePath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Could not read OpenCode sessions from ${this.databasePath}.`;
+  }
+}
+
+const OPENCODE_DATABASE_PATTERN = /^opencode(?:-[a-zA-Z0-9_-]+)?\.db$/;
 const METADATA_READ_BYTES = 8 * 1024;
 const MAX_TRANSCRIPT_SCAN_BYTES = 1024 * 1024;
 const MAX_CODEX_SESSION_INDEX_BYTES = 1024 * 1024;
@@ -255,6 +269,16 @@ export class AgentSessionScanner extends Context.Service<
 
 type AgentSessionSource = AgentSessionProjectCandidate["sources"][number];
 
+interface OpenCodeSessionMeta {
+  readonly databasePath: string;
+  readonly sessionId: string;
+  readonly schemaVersion: "v2" | "v1";
+  readonly title: string | null;
+  readonly modelJson: string | null;
+  readonly createdAtMs: number;
+  readonly updatedAtMs: number;
+}
+
 interface RawCandidate {
   readonly cwd: string;
   readonly source: AgentSessionSource;
@@ -266,7 +290,90 @@ interface RawCandidate {
     readonly filePath: string;
     readonly mtimeMs: number | null;
     readonly projectRoots?: ReadonlyArray<string> | undefined;
+    readonly opencode?: OpenCodeSessionMeta | undefined;
   }>;
+}
+
+function asJsonRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  try {
+    return asJsonRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function formatOpenCodeModel(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    if (trimmed.startsWith("{")) {
+      const parsed = parseJsonRecord(trimmed);
+      return parsed === null ? null : formatOpenCodeModel(parsed);
+    }
+    const separator = trimmed.indexOf("/");
+    return separator > 0 && separator < trimmed.length - 1 ? trimmed : null;
+  }
+  const record = asJsonRecord(value);
+  if (record === null) return null;
+  const providerId = typeof record.providerID === "string" ? record.providerID.trim() : "";
+  const modelId =
+    typeof record.id === "string"
+      ? record.id.trim()
+      : typeof record.modelID === "string"
+        ? record.modelID.trim()
+        : "";
+  if (providerId.length > 0 && modelId.length > 0) {
+    return `${providerId}/${modelId}`;
+  }
+  return "model" in record ? formatOpenCodeModel(record.model) : null;
+}
+
+function extractOpenCodeContentText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const parts: Array<string> = [];
+  for (const item of content) {
+    const record = asJsonRecord(item);
+    if (record === null || record.type !== "text") continue;
+    if (record.synthetic === true || record.ignored === true) continue;
+    if (typeof record.text !== "string") continue;
+    const trimmed = record.text.trim();
+    if (trimmed.length > 0) parts.push(trimmed);
+  }
+  return parts.join("\n");
+}
+
+function normalizeEpochMs(value: unknown, fallbackMs: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallbackMs;
+}
+
+function sqliteTables(database: NodeSqlite.DatabaseSync): ReadonlySet<string> {
+  const rows = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all() as ReadonlyArray<{ readonly name?: unknown }>;
+  const names = new Set<string>();
+  for (const row of rows) {
+    if (typeof row.name === "string") names.add(row.name);
+  }
+  return names;
+}
+
+function sqliteColumns(database: NodeSqlite.DatabaseSync, table: string): ReadonlySet<string> {
+  const rows = database.prepare(`PRAGMA table_info(${table})`).all() as ReadonlyArray<{
+    readonly name?: unknown;
+  }>;
+  const names = new Set<string>();
+  for (const row of rows) {
+    if (typeof row.name === "string") names.add(row.name);
+  }
+  return names;
 }
 
 interface TranscriptCandidate {
@@ -1832,6 +1939,502 @@ export const make = Effect.gen(function* () {
     }));
   });
 
+  const resolveOpenCodeDataDirs = Effect.fn("AgentSessionScanner.resolveOpenCodeDataDirs")(
+    function* (environment: NodeJS.ProcessEnv) {
+      const roots = environment["OPENCODE_DATA_DIR"]
+        ?.split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const dataHome = environment["XDG_DATA_HOME"]?.trim();
+      const defaults = [
+        path.join(
+          dataHome && path.isAbsolute(dataHome) ? dataHome : path.join(homeDir, ".local", "share"),
+          "opencode",
+        ),
+      ];
+      const directories: Array<string> = [];
+      const seen = new Set<string>();
+      for (const root of roots?.length ? roots : defaults) {
+        const resolved = path.resolve(expandHomePath(root, homeDir));
+        const key = yield* directoryIdentity(resolved);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        directories.push(resolved);
+      }
+      return directories;
+    },
+  );
+
+  const discoverOpenCodeDatabases = Effect.fn("AgentSessionScanner.discoverOpenCodeDatabases")(
+    function* (dataDir: string, configuredDb?: string) {
+      const configured = configuredDb?.trim();
+      if (configured) {
+        const candidate = path.isAbsolute(configured) ? configured : path.join(dataDir, configured);
+        const stats = yield* statOption(candidate);
+        return Option.isSome(stats) && stats.value.type === "File" ? [candidate] : [];
+      }
+      const entries = (yield* listDirectory(dataDir))
+        .filter((name) => OPENCODE_DATABASE_PATTERN.test(name))
+        .toSorted((left, right) =>
+          left === "opencode.db" ? -1 : right === "opencode.db" ? 1 : left.localeCompare(right),
+        );
+      const databases: Array<string> = [];
+      for (const entry of entries) {
+        const filePath = path.join(dataDir, entry);
+        const stats = yield* statOption(filePath);
+        if (Option.isSome(stats) && stats.value.type === "File") {
+          databases.push(filePath);
+        }
+      }
+      return databases;
+    },
+  );
+
+  const discoverOpenCodeCandidates = Effect.fn("AgentSessionScanner.discoverOpenCodeCandidates")(
+    function* (
+      databasePaths: ReadonlyArray<{
+        readonly databasePath: string;
+        readonly homePath: string;
+        readonly providerInstanceId: ProviderInstanceId;
+      }>,
+    ) {
+      interface DiscoveredOpenCodeSession {
+        readonly cwd: string;
+        readonly providerInstanceId: ProviderInstanceId;
+        readonly homePath: string;
+        readonly meta: OpenCodeSessionMeta;
+      }
+      const sessions: Array<DiscoveredOpenCodeSession> = [];
+      let truncated = false;
+
+      for (const { databasePath, homePath, providerInstanceId } of databasePaths) {
+        const readResult = yield* Effect.try({
+          try: () => {
+            const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
+            try {
+              database.exec("PRAGMA busy_timeout = 100");
+              const tables = sqliteTables(database);
+              const seenSessionIds = new Set<string>();
+              const found: Array<DiscoveredOpenCodeSession> = [];
+              let dbTruncated = false;
+
+              const readTable = (table: "session_v2" | "session", schemaVersion: "v2" | "v1") => {
+                if (!tables.has(table)) return;
+                const columns = sqliteColumns(database, table);
+                if (
+                  !columns.has("id") ||
+                  !columns.has("directory") ||
+                  !columns.has("time_updated")
+                ) {
+                  return;
+                }
+                const titleSelect = columns.has("title") ? "title" : "NULL AS title";
+                const modelSelect = columns.has("model") ? "model" : "NULL AS model";
+                const createdSelect = columns.has("time_created")
+                  ? "time_created"
+                  : "time_updated AS time_created";
+                const filters = ["directory IS NOT NULL", "trim(directory) != ''"];
+                if (columns.has("parent_id")) filters.push("parent_id IS NULL");
+                if (columns.has("time_archived")) filters.push("time_archived IS NULL");
+                const rows = database
+                  .prepare(
+                    `SELECT id, directory, ${titleSelect}, ${modelSelect}, ${createdSelect}, time_updated
+                     FROM ${table}
+                     WHERE ${filters.join(" AND ")}
+                     ORDER BY time_updated DESC
+                     LIMIT ?`,
+                  )
+                  .all(MAX_TRANSCRIPTS_PER_SOURCE + 1) as ReadonlyArray<{
+                  readonly id?: unknown;
+                  readonly directory?: unknown;
+                  readonly title?: unknown;
+                  readonly model?: unknown;
+                  readonly time_created?: unknown;
+                  readonly time_updated?: unknown;
+                }>;
+                if (rows.length > MAX_TRANSCRIPTS_PER_SOURCE) {
+                  dbTruncated = true;
+                }
+                for (const row of rows.slice(0, MAX_TRANSCRIPTS_PER_SOURCE)) {
+                  if (typeof row.id !== "string" || typeof row.directory !== "string") continue;
+                  const sessionId = row.id.trim();
+                  const directory = row.directory.trim();
+                  if (sessionId.length === 0 || directory.length === 0) continue;
+                  if (seenSessionIds.has(sessionId)) continue;
+                  seenSessionIds.add(sessionId);
+                  const updatedAtMs = normalizeEpochMs(row.time_updated, 0);
+                  const createdAtMs = normalizeEpochMs(row.time_created, updatedAtMs);
+                  found.push({
+                    cwd: directory,
+                    providerInstanceId,
+                    homePath,
+                    meta: {
+                      databasePath,
+                      sessionId,
+                      schemaVersion,
+                      title:
+                        typeof row.title === "string" && row.title.trim().length > 0
+                          ? row.title.trim()
+                          : null,
+                      modelJson:
+                        typeof row.model === "string" && row.model.trim().length > 0
+                          ? row.model.trim()
+                          : null,
+                      createdAtMs,
+                      updatedAtMs,
+                    },
+                  });
+                }
+              };
+
+              readTable("session_v2", "v2");
+              readTable("session", "v1");
+              return { found, dbTruncated };
+            } finally {
+              database.close();
+            }
+          },
+          catch: (cause) => new OpenCodeStateReadError({ databasePath, cause }),
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not read OpenCode sessions", { databasePath, cause }).pipe(
+              Effect.as({ found: [] as Array<DiscoveredOpenCodeSession>, dbTruncated: false }),
+            ),
+          ),
+        );
+        truncated ||= readResult.dbTruncated;
+        sessions.push(...readResult.found);
+      }
+
+      sessions.sort(
+        (left, right) =>
+          right.meta.updatedAtMs - left.meta.updatedAtMs ||
+          left.meta.sessionId.localeCompare(right.meta.sessionId),
+      );
+      if (sessions.length > MAX_TRANSCRIPTS_PER_SOURCE) {
+        truncated = true;
+      }
+      const selected = sessions.slice(0, MAX_TRANSCRIPTS_PER_SOURCE);
+      const byOwnerAndCwd = new Map<
+        string,
+        {
+          cwd: string;
+          providerInstanceId: ProviderInstanceId;
+          homePath: string;
+          lastActiveAtMs: number;
+          transcripts: Array<RawCandidate["transcripts"][number]>;
+        }
+      >();
+      for (const session of selected) {
+        const key = `${session.providerInstanceId}\0${session.cwd}`;
+        const transcript = {
+          filePath: `${session.meta.databasePath}#${session.meta.sessionId}`,
+          mtimeMs: session.meta.updatedAtMs,
+          opencode: session.meta,
+        };
+        const existing = byOwnerAndCwd.get(key);
+        if (existing) {
+          existing.lastActiveAtMs = Math.max(existing.lastActiveAtMs, session.meta.updatedAtMs);
+          existing.transcripts.push(transcript);
+        } else {
+          byOwnerAndCwd.set(key, {
+            cwd: session.cwd,
+            providerInstanceId: session.providerInstanceId,
+            homePath: session.homePath,
+            lastActiveAtMs: session.meta.updatedAtMs,
+            transcripts: [transcript],
+          });
+        }
+      }
+      return {
+        candidates: Array.from(byOwnerAndCwd.values(), (group): RawCandidate => ({
+          cwd: group.cwd,
+          source: "opencode",
+          providerInstanceId: group.providerInstanceId,
+          homePath: group.homePath,
+          threadCount: group.transcripts.length,
+          lastActiveAtMs: group.lastActiveAtMs,
+          transcripts: group.transcripts,
+        })),
+        truncated,
+      };
+    },
+  );
+
+  const readOpenCodeSession = Effect.fn("AgentSessionScanner.readOpenCodeSession")(function* (
+    meta: OpenCodeSessionMeta,
+    providerInstanceId: ProviderInstanceId,
+  ) {
+    return yield* Effect.try({
+      try: () => {
+        const database = new NodeSqlite.DatabaseSync(meta.databasePath, { readOnly: true });
+        try {
+          database.exec("PRAGMA busy_timeout = 100");
+          const tables = sqliteTables(database);
+          const sessionTable = meta.schemaVersion === "v2" ? "session_v2" : "session";
+          if (!tables.has(sessionTable)) return null;
+          const sessionCols = sqliteColumns(database, sessionTable);
+          if (
+            !sessionCols.has("id") ||
+            !sessionCols.has("directory") ||
+            !sessionCols.has("time_updated")
+          ) {
+            return null;
+          }
+          const titleSelect = sessionCols.has("title") ? "title" : "NULL AS title";
+          const modelSelect = sessionCols.has("model") ? "model" : "NULL AS model";
+          const createdSelect = sessionCols.has("time_created")
+            ? "time_created"
+            : "time_updated AS time_created";
+          const filters = ["id = ?"];
+          if (sessionCols.has("parent_id")) filters.push("parent_id IS NULL");
+          if (sessionCols.has("time_archived")) filters.push("time_archived IS NULL");
+          const sessionRow = database
+            .prepare(
+              `SELECT directory, ${titleSelect}, ${modelSelect}, ${createdSelect}, time_updated
+               FROM ${sessionTable}
+               WHERE ${filters.join(" AND ")}`,
+            )
+            .get(meta.sessionId) as
+            | {
+                readonly directory?: unknown;
+                readonly title?: unknown;
+                readonly model?: unknown;
+                readonly time_created?: unknown;
+                readonly time_updated?: unknown;
+              }
+            | undefined;
+          if (sessionRow === undefined || typeof sessionRow.directory !== "string") return null;
+          const directory = sessionRow.directory.trim();
+          if (directory.length === 0) return null;
+          const updatedAtMs = normalizeEpochMs(sessionRow.time_updated, meta.updatedAtMs);
+          const createdAtMs = normalizeEpochMs(sessionRow.time_created, meta.createdAtMs);
+          const liveTitle =
+            typeof sessionRow.title === "string" && sessionRow.title.trim().length > 0
+              ? sessionRow.title.trim()
+              : null;
+          const liveModelJson =
+            typeof sessionRow.model === "string" && sessionRow.model.trim().length > 0
+              ? sessionRow.model.trim()
+              : null;
+
+          let historyBytes = 0;
+          let conversationMessageCount = 0;
+          let firstUserMessage: AgentSessionThreadMessage | undefined;
+          let lastModel: string | null = null;
+          const messages: Array<AgentSessionThreadMessage> = [];
+
+          const pushMessage = (role: "user" | "assistant", text: string, timestampMs: number) => {
+            const trimmed = text.trim();
+            if (trimmed.length === 0) return true;
+            historyBytes += Buffer.byteLength(trimmed, "utf8");
+            if (historyBytes > MAX_IMPORT_HISTORY_BYTES) return false;
+            const message: AgentSessionThreadMessage = {
+              role,
+              text: trimmed,
+              createdAt: DateTime.formatIso(DateTime.makeUnsafe(timestampMs)),
+            };
+            if (firstUserMessage === undefined && role === "user") {
+              firstUserMessage = message;
+            }
+            conversationMessageCount += 1;
+            messages.push(message);
+            if (messages.length > MAX_IMPORTED_MESSAGES) messages.shift();
+            return true;
+          };
+
+          if (meta.schemaVersion === "v2") {
+            if (!tables.has("session_message")) {
+              return {
+                directory,
+                createdAtMs,
+                updatedAtMs,
+                historyBytes,
+                thread: "empty" as const,
+              };
+            }
+            const partsByMessage = new Map<string, Array<string>>();
+            if (tables.has("session_part")) {
+              const partCols = sqliteColumns(database, "session_part");
+              const partOrderBy = partCols.has("ordinal")
+                ? "message_id ASC, ordinal ASC"
+                : "message_id ASC";
+              const partRows = database
+                .prepare(
+                  `SELECT message_id, data FROM session_part
+                   WHERE session_id = ? AND type = 'text'
+                   ORDER BY ${partOrderBy}
+                   LIMIT ?`,
+                )
+                .all(meta.sessionId, MAX_IMPORT_RECORDS + 1) as ReadonlyArray<{
+                readonly message_id?: unknown;
+                readonly data?: unknown;
+              }>;
+              if (partRows.length > MAX_IMPORT_RECORDS) return null;
+              let partBytes = 0;
+              for (const row of partRows) {
+                if (typeof row.message_id !== "string") continue;
+                const parsed = parseJsonRecord(row.data);
+                if (parsed === null || parsed.synthetic === true || parsed.ignored === true)
+                  continue;
+                const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
+                if (text.length === 0) continue;
+                partBytes += Buffer.byteLength(text, "utf8");
+                if (partBytes > MAX_IMPORT_HISTORY_BYTES) return null;
+                const existing = partsByMessage.get(row.message_id);
+                if (existing === undefined) partsByMessage.set(row.message_id, [text]);
+                else existing.push(text);
+              }
+            }
+            const msgCols = sqliteColumns(database, "session_message");
+            const msgOrderBy = msgCols.has("seq")
+              ? "seq ASC, time_created ASC, id ASC"
+              : "time_created ASC, id ASC";
+            const msgRows = database
+              .prepare(
+                `SELECT id, type, time_created, data FROM session_message
+                 WHERE session_id = ? AND type IN ('user', 'assistant')
+                 ORDER BY ${msgOrderBy}
+                 LIMIT ?`,
+              )
+              .all(meta.sessionId, MAX_IMPORT_RECORDS + 1) as ReadonlyArray<{
+              readonly id?: unknown;
+              readonly type?: unknown;
+              readonly time_created?: unknown;
+              readonly data?: unknown;
+            }>;
+            if (msgRows.length > MAX_IMPORT_RECORDS) return null;
+            for (const row of msgRows) {
+              if (typeof row.id !== "string" || (row.type !== "user" && row.type !== "assistant")) {
+                continue;
+              }
+              const parsed = parseJsonRecord(row.data);
+              const partText = partsByMessage.get(row.id)?.join("\n") ?? "";
+              let text = "";
+              if (row.type === "user") {
+                text =
+                  (typeof parsed?.text === "string" ? parsed.text.trim() : "") ||
+                  partText ||
+                  extractOpenCodeContentText(parsed?.content);
+              } else {
+                lastModel = formatOpenCodeModel(parsed?.model) ?? lastModel;
+                text = partText || extractOpenCodeContentText(parsed?.content);
+              }
+              const msgTimeMs = normalizeEpochMs(
+                asJsonRecord(parsed?.time)?.created,
+                normalizeEpochMs(row.time_created, updatedAtMs),
+              );
+              if (!pushMessage(row.type, text, msgTimeMs)) return null;
+            }
+          } else {
+            if (!tables.has("message")) {
+              return {
+                directory,
+                createdAtMs,
+                updatedAtMs,
+                historyBytes,
+                thread: "empty" as const,
+              };
+            }
+            const partsByMessage = new Map<string, Array<string>>();
+            if (tables.has("part")) {
+              const partRows = database
+                .prepare(
+                  `SELECT message_id, data FROM part
+                   WHERE session_id = ? AND json_valid(data) AND json_extract(data, '$.type') = 'text'
+                   ORDER BY time_created ASC, id ASC
+                   LIMIT ?`,
+                )
+                .all(meta.sessionId, MAX_IMPORT_RECORDS + 1) as ReadonlyArray<{
+                readonly message_id?: unknown;
+                readonly data?: unknown;
+              }>;
+              if (partRows.length > MAX_IMPORT_RECORDS) return null;
+              let partBytes = 0;
+              for (const row of partRows) {
+                if (typeof row.message_id !== "string") continue;
+                const parsed = parseJsonRecord(row.data);
+                if (parsed === null || parsed.synthetic === true || parsed.ignored === true)
+                  continue;
+                const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
+                if (text.length === 0) continue;
+                partBytes += Buffer.byteLength(text, "utf8");
+                if (partBytes > MAX_IMPORT_HISTORY_BYTES) return null;
+                const existing = partsByMessage.get(row.message_id);
+                if (existing === undefined) partsByMessage.set(row.message_id, [text]);
+                else existing.push(text);
+              }
+            }
+            const msgRows = database
+              .prepare(
+                `SELECT id, time_created, data FROM message
+                 WHERE session_id = ?
+                 ORDER BY time_created ASC, id ASC
+                 LIMIT ?`,
+              )
+              .all(meta.sessionId, MAX_IMPORT_RECORDS + 1) as ReadonlyArray<{
+              readonly id?: unknown;
+              readonly time_created?: unknown;
+              readonly data?: unknown;
+            }>;
+            if (msgRows.length > MAX_IMPORT_RECORDS) return null;
+            for (const row of msgRows) {
+              if (typeof row.id !== "string") continue;
+              const parsed = parseJsonRecord(row.data);
+              const role = parsed?.role;
+              if (role !== "user" && role !== "assistant") continue;
+              if (role === "assistant") {
+                lastModel = formatOpenCodeModel(parsed) ?? lastModel;
+              }
+              const text =
+                partsByMessage.get(row.id)?.join("\n") ||
+                (typeof parsed?.text === "string" ? parsed.text.trim() : "") ||
+                extractOpenCodeContentText(parsed?.content);
+              const msgTimeMs = normalizeEpochMs(
+                asJsonRecord(parsed?.time)?.created,
+                normalizeEpochMs(row.time_created, updatedAtMs),
+              );
+              if (!pushMessage(role, text, msgTimeMs)) return null;
+            }
+          }
+
+          if (messages.length === 0) {
+            return { directory, createdAtMs, updatedAtMs, historyBytes, thread: "empty" as const };
+          }
+          if (firstUserMessage === undefined) return null;
+          const retainedMessages = messages.includes(firstUserMessage)
+            ? messages
+            : [firstUserMessage, ...messages.slice(-(MAX_IMPORTED_MESSAGES - 1))];
+          const thread: AgentSessionThread = {
+            source: "opencode",
+            providerInstanceId,
+            providerSessionId: meta.sessionId,
+            title: liveTitle ?? deriveTitle("opencode", firstUserMessage.text) ?? "Imported thread",
+            model: lastModel ?? formatOpenCodeModel(liveModelJson),
+            createdAt:
+              retainedMessages[0]?.createdAt ??
+              DateTime.formatIso(DateTime.makeUnsafe(createdAtMs)),
+            updatedAt: DateTime.formatIso(DateTime.makeUnsafe(updatedAtMs)),
+            messages: retainedMessages,
+            omittedMessageCount: conversationMessageCount - retainedMessages.length,
+          };
+          return { directory, createdAtMs, updatedAtMs, historyBytes, thread };
+        } finally {
+          database.close();
+        }
+      },
+      catch: (cause) => new OpenCodeStateReadError({ databasePath: meta.databasePath, cause }),
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not read OpenCode session", {
+          databasePath: meta.databasePath,
+          sessionId: meta.sessionId,
+          cause,
+        }).pipe(Effect.as(null)),
+      ),
+    );
+  });
+
   const collectCandidates = Effect.fn("AgentSessionScanner.collectCandidates")(function* () {
     const settings = yield* serverSettings.getSettings.pipe(
       Effect.mapError((cause) => new AgentSessionScanError({ operation: "read-settings", cause })),
@@ -1857,7 +2460,7 @@ export const make = Effect.gen(function* () {
     let truncated = false;
     let metadataTruncated = false;
 
-    for (const source of ["claudeAgent", "codex", "pi"] as const) {
+    for (const source of ["claudeAgent", "codex", "pi", "opencode"] as const) {
       const instances: Array<{
         readonly instanceId: ProviderInstanceId;
         readonly config: ProviderInstanceConfig;
@@ -1884,6 +2487,40 @@ export const make = Effect.gen(function* () {
         const rightDefault = right.instanceId === source ? 0 : 1;
         return leftDefault - rightDefault;
       });
+      if (source === "opencode") {
+        const seenDatabases = new Set<string>();
+        const databasePaths: Array<{
+          readonly databasePath: string;
+          readonly homePath: string;
+          readonly providerInstanceId: ProviderInstanceId;
+        }> = [];
+        for (const { instanceId, config: instance } of instances) {
+          const environment = yield* mergeProviderInstanceEnvironment(
+            instance.environment,
+            hostEnvironment,
+          ).pipe(Effect.provideService(HostProcess.HomeDirectory, homeDir));
+          const dataDirs = yield* resolveOpenCodeDataDirs(environment);
+          for (const dataDir of dataDirs) {
+            for (const databasePath of yield* discoverOpenCodeDatabases(
+              dataDir,
+              environment["OPENCODE_DB"],
+            )) {
+              const dbKey = yield* directoryIdentity(databasePath);
+              if (seenDatabases.has(dbKey)) continue;
+              seenDatabases.add(dbKey);
+              databasePaths.push({
+                databasePath,
+                homePath: dataDir,
+                providerInstanceId: instanceId,
+              });
+            }
+          }
+        }
+        const openCodeResult = yield* discoverOpenCodeCandidates(databasePaths);
+        raw.push(...openCodeResult.candidates);
+        truncated ||= openCodeResult.truncated;
+        continue;
+      }
       const homes: Array<{ homePath: string; providerInstanceId: ProviderInstanceId }> = [];
       const seenHomes = new Set<string>();
       for (const { instanceId, config: instance } of instances) {
@@ -2264,6 +2901,77 @@ export const make = Effect.gen(function* () {
           );
           if (completed === undefined && (transcriptsRemaining === 0 || bytesRemaining === 0)) {
             return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
+          }
+          if (candidate.source === "opencode" && transcript.opencode !== undefined) {
+            const opencode = transcript.opencode;
+            const stats = yield* statOption(opencode.databasePath);
+            if (Option.isNone(stats) || stats.value.type !== "File") {
+              return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
+            }
+            const identity: TranscriptIdentity = {
+              filePath: transcript.filePath,
+              size: 0,
+              mtimeMs: opencode.updatedAtMs,
+              device: Number(stats.value.dev),
+              inode: Option.match(stats.value.ino, { onNone: () => null, onSome: String }),
+              birthtimeMs: opencode.createdAtMs,
+            };
+            const completedSource = completed?.find(
+              (source) =>
+                source.provider === "opencode" && sameTranscriptIdentity(source, identity),
+            );
+            if (completedSource !== undefined) {
+              const sessionKey = `${completedSource.providerInstanceId}\0${completedSource.providerSessionId}`;
+              if (importedSessions.has(sessionKey)) return Option.none<AgentSessionRecentThread>();
+              importedSessions.add(sessionKey);
+              return Option.some<AgentSessionRecentThread>({
+                _tag: "AlreadyImported",
+                source: completedSource,
+              });
+            }
+            if (transcriptsRemaining === 0 || bytesRemaining <= 0) {
+              return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
+            }
+            transcriptsRemaining -= 1;
+            const loaded = yield* readOpenCodeSession(opencode, candidate.providerInstanceId);
+            if (loaded === null) {
+              return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
+            }
+            if (loaded.thread === "empty") {
+              transcriptsRemaining += 1;
+              return Option.none<AgentSessionRecentThread>();
+            }
+            const expandedCwd = expandHomePath(loaded.directory.trim(), homeDir);
+            if (
+              !path.isAbsolute(expandedCwd) ||
+              !(yield* belongsToRoot(path.resolve(expandedCwd)))
+            ) {
+              return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
+            }
+            const worktree = yield* rootWorktree(path.resolve(expandedCwd));
+            if (loaded.historyBytes > bytesRemaining) {
+              return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
+            }
+            bytesRemaining = Math.max(0, bytesRemaining - loaded.historyBytes);
+            const source: AgentSessionImportSource = {
+              ...identity,
+              mtimeMs: loaded.updatedAtMs,
+              birthtimeMs: loaded.createdAtMs,
+              provider: "opencode",
+              providerInstanceId: candidate.providerInstanceId,
+              providerSessionId: opencode.sessionId,
+            };
+            const sessionKey = `${candidate.providerInstanceId}\0${opencode.sessionId}`;
+            if (importedSessions.has(sessionKey)) {
+              return Option.some<AgentSessionRecentThread>({ _tag: "Duplicate", source });
+            }
+            importedSessions.add(sessionKey);
+            return Option.some<AgentSessionRecentThread>({
+              _tag: "Importable",
+              thread: loaded.thread,
+              source,
+              worktree,
+            });
           }
           const stats = yield* statOption(transcript.filePath);
           if (Option.isNone(stats) || stats.value.type !== "File") {

@@ -2,6 +2,7 @@ export type SelectionActionPoint = { x: number; y: number };
 
 export const SELECTION_MULTI_CLICK_INTERVAL_MS = 500;
 const SELECTION_SCROLL_SETTLE_MS = 150;
+const SELECTION_ACTION_GAP_PX = 12;
 
 export function resolveSelectionActionPosition(options: {
   bounds: { left: number; top: number; width: number; height: number };
@@ -10,9 +11,13 @@ export function resolveSelectionActionPosition(options: {
   viewport: { width: number; height: number };
 }): SelectionActionPoint {
   const { bounds, selectionRect, pointer, viewport } = options;
-  const preferred = pointer ?? {
-    x: selectionRect?.right ?? bounds.left + bounds.width - 140,
-    y: selectionRect ? selectionRect.bottom + 4 : bounds.top + 12,
+  const selectionBottom = selectionRect?.bottom ?? bounds.top + 12;
+  const preferred = {
+    ...(pointer ?? {
+      x: selectionRect?.right ?? bounds.left + bounds.width - 140,
+      y: selectionBottom,
+    }),
+    y: Math.max(pointer?.y ?? selectionBottom, selectionBottom) + SELECTION_ACTION_GAP_PX,
   };
   return {
     x: Math.max(

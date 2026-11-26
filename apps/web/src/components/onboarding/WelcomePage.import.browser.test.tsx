@@ -457,6 +457,20 @@ it("waits for a ready agent to start, and Start without an agent still finishes 
   expect(state.createProject).toHaveBeenCalledTimes(2);
 });
 
+it("closes the page by finishing setup without importing anything", async () => {
+  using _now = setup();
+  await using _screen = await mountWelcome();
+  const close = document.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+  expect(close).not.toBeNull();
+  expect(close?.disabled).toBe(false);
+  await act(async () => close?.click());
+  await vi.waitFor(() => expect(state.completeOnboarding).toHaveBeenCalledOnce());
+  expect(state.onDone).toHaveBeenCalledOnce();
+  expect(state.onDone).toHaveBeenCalledWith(undefined);
+  expect(state.createProject).not.toHaveBeenCalled();
+  expect(state.importThreads).not.toHaveBeenCalled();
+});
+
 it("blocks leaving the page until the imported projects have landed", async () => {
   using _now = setup();
   const creation = deferred<void>();

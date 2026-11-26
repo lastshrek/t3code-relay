@@ -351,6 +351,7 @@ it.layer(layerTest)("AntigravityDriver", (it) => {
           ]);
           expect(launch.profileDirectory).toBe(h.profileDirectory);
           expect(launch.forceFileStorage).toBe("1");
+          expect(launch.environment.AGY_CLI_FORCE_FILE_TOKEN_STORAGE).toBe("1");
           expect(launch.extendEnv).toBe(false);
         }
         for (const launch of h.launches) expect(launch.credentialKeys).toEqual([]);

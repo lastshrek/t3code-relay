@@ -1,4 +1,10 @@
 {
+  "8510a9f85a860bc8": "Credits used",
+  "ad0c8dfe951831db": "{count, plural, one {# credit used} other {# credits used}}",
+  "60bcf58d2b5c0496": "View by session",
+  "619905542f2afe10": "View by project",
+  "11a285d1f0d20fe5": "Switch to the session list",
+  "9b9df5ba41c4a8e2": "Group threads by project",
   "4bcfa3b976a421cf": "사이드 채팅",
   "23be753133ae6950": "스레드",
   "0001ae5846061bb6": "{machine}의 스레드",

@@ -83,6 +83,30 @@ function project(id: string): Project {
   };
 }
 
+describe("sidebar view toggle", () => {
+  it("switches between session and project views and persists the choice", async () => {
+    using stack = new DisposableStack();
+    const previousSettings = getClientSettings();
+    stack.defer(() => __setClientSettingsForTests(previousSettings));
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      boringSidebarEnabled: false,
+    });
+    vi.mocked(useProjects).mockReturnValue([]);
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "View by project" }));
+    expect(getClientSettings().boringSidebarEnabled).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: "View by session" }));
+    expect(getClientSettings().boringSidebarEnabled).toBe(false);
+  });
+});
+
 describe("sidebar header new thread", () => {
   it.each([
     { mode: "normal", count: 2, shift: false, picker: true },

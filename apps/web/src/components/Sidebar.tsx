@@ -73,6 +73,7 @@ import {
   ChevronDownIcon,
   FolderIcon,
   FolderPlusIcon,
+  ListIcon,
   PlusIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -137,7 +138,7 @@ import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { updateClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -1010,6 +1011,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const boringSidebarEnabled = useClientSettings((settings) => settings.boringSidebarEnabled);
   const folderRowsMultiline = useClientSettings((settings) => settings.boringSidebarMultilineRows);
+  // One tap toggles between the flat session list and project folders. The same
+  // setting backs the Labs switch, so both entry points stay in sync.
+  const sidebarViewToggle = (
+    <SidebarHeaderIconButton
+      label={boringSidebarEnabled ? gt("View by session") : gt("View by project")}
+      tooltip={
+        boringSidebarEnabled ? gt("Switch to the session list") : gt("Group threads by project")
+      }
+      onClick={() => void updateClientSettings({ boringSidebarEnabled: !boringSidebarEnabled })}
+    >
+      {boringSidebarEnabled ? <ListIcon className="size-4" /> : <FolderIcon className="size-4" />}
+    </SidebarHeaderIconButton>
+  );
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
@@ -3092,6 +3106,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
               hasProjects={projectGroups.length > 0}
+              viewToggle={sidebarViewToggle}
               projectScope={
                 <Combobox
                   items={projectScopeItems}

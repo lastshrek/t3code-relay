@@ -1673,6 +1673,23 @@ describe("sidebarFolderExpansionKeys", () => {
 });
 
 describe("groupSidebarThreadsByProject", () => {
+  it("merges threads from different agents in the same project into one folder", () => {
+    const projectId = ProjectId.make("shared");
+    const group = {
+      projectKey: "shared",
+      memberProjectRefs: [{ environmentId: localEnvironmentId, projectId }],
+    };
+    // Provider/agent is irrelevant to grouping — only the project ref matters.
+    const threads = [
+      { id: "codex-1", environmentId: localEnvironmentId, projectId, provider: "codex" },
+      { id: "claude-1", environmentId: localEnvironmentId, projectId, provider: "claudeAgent" },
+      { id: "wb-1", environmentId: localEnvironmentId, projectId, provider: "acpRegistry" },
+    ];
+    const folders = groupSidebarThreadsByProject([group], threads, () => false);
+    expect(folders).toHaveLength(1);
+    expect(folders[0]?.threads.map((thread) => thread.id)).toEqual(["codex-1", "claude-1", "wb-1"]);
+  });
+
   it("puts each thread in its project's folder and drops empty projects unless kept", () => {
     const remoteEnvironmentId = EnvironmentId.make("environment-remote");
     const t3code = ProjectId.make("t3code");

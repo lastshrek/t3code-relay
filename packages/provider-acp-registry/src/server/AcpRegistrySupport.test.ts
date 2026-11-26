@@ -514,7 +514,7 @@ describe("AcpRegistrySupport", () => {
           CODEBUDDY_INTERNET_ENVIRONMENT: "public",
         },
       );
-      expect(overridden.spawn.env.CODEBUDDY_INTERNET_ENVIRONMENT).toBe("public");
+      expect(overridden.spawn.env?.CODEBUDDY_INTERNET_ENVIRONMENT).toBe("public");
     }).pipe(
       Effect.scoped,
       Effect.provide(

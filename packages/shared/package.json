@@ -443,6 +443,10 @@
       "types": "./src/usageLimits.ts",
       "import": "./src/usageLimits.ts"
     },
+    "./modelProfiles": {
+      "types": "./src/modelProfiles.ts",
+      "import": "./src/modelProfiles.ts"
+    },
     "./desktopAppControl": {
       "types": "./src/desktopAppControl.ts",
       "import": "./src/desktopAppControl.ts"

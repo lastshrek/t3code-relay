@@ -384,6 +384,20 @@ export type ModelPreferences = {
   readonly providerModelPreferences: typeof ProviderModelPreferences.Type;
 };
 
+/**
+ * A named set of models for the two working phases. Each phase is an ordered
+ * list: the first entry is the primary model and the rest are fallbacks tried
+ * in order when the primary is unavailable or out of quota.
+ */
+export const ModelProfile = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  thinkModels: Schema.Array(ModelSelection).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  executeModels: Schema.Array(ModelSelection).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type ModelProfile = typeof ModelProfile.Type;
+export const ModelProfiles = Schema.Array(ModelProfile);
+
 export const VoiceShortcutMode = Schema.Literals(["auto", "hold", "toggle"]);
 export type VoiceShortcutMode = typeof VoiceShortcutMode.Type;
 
@@ -1463,6 +1477,11 @@ export const ServerSettings = Schema.Struct({
   fallbackModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  // Ordered think/execute model sets. Empty means the feature is off and the
+  // composer keeps using the ordinary model picker with no phase automation.
+  modelProfiles: ModelProfiles.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  activeModelProfileId: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  autoFallbackOnUsageLimit: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
@@ -1924,6 +1943,9 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   fallbackModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  modelProfiles: Schema.optionalKey(ModelProfiles),
+  activeModelProfileId: Schema.optionalKey(TrimmedString),
+  autoFallbackOnUsageLimit: Schema.optionalKey(Schema.Boolean),
   /** Replaces each project's override set; null removes it. Omitted providerInstances retains its stored value. */
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(

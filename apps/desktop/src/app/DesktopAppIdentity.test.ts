@@ -177,34 +177,41 @@ describe("DesktopAppIdentity", () => {
   );
 
   it.effect.each([
-    { stage: "Beta", environment: {} },
+    { stage: "Latest", environment: {}, runtimeName: "T3 Code", displayName: "T3 Code" },
     {
       stage: "Nightly",
       environment: { appVersion: "0.0.43-nightly.20260929.2428" },
+      runtimeName: "T3 Code Nightly",
+      displayName: "T3 Code (Nightly)",
     },
     {
       stage: "Dev",
       environment: { env: { VITE_DEV_SERVER_URL: "http://localhost:5173" } },
+      runtimeName: "T3 Code Dev",
+      displayName: "T3 Code (Dev)",
     },
-  ])("uses a valid native User-Agent product name for $stage", ({ stage, environment }) => {
-    const calls: ElectronAppCalls = {
-      setAboutPanelOptions: [],
-      setDockIcon: [],
-      setName: [],
-    };
+  ])(
+    "uses a valid native User-Agent product name for $stage",
+    ({ stage: _stage, environment, runtimeName: expectedRuntimeName, displayName }) => {
+      const calls: ElectronAppCalls = {
+        setAboutPanelOptions: [],
+        setDockIcon: [],
+        setName: [],
+      };
 
-    return withIdentity(
-      Effect.gen(function* () {
-        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
-        yield* identity.configure;
+      return withIdentity(
+        Effect.gen(function* () {
+          const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+          yield* identity.configure;
 
-        const runtimeName = calls.setName[0];
-        assert.isDefined(runtimeName);
-        assert.equal(runtimeName, `T3 Code ${stage}`);
-        assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, `T3 Code (${stage})`);
-      }),
-      { calls, environment },
-    );
-  });
+          const runtimeName = calls.setName[0];
+          assert.isDefined(runtimeName);
+          assert.equal(runtimeName, expectedRuntimeName);
+          assert.match(runtimeName.replaceAll(" ", ""), /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/);
+          assert.equal(calls.setAboutPanelOptions[0]?.applicationName, displayName);
+        }),
+        { calls, environment },
+      );
+    },
+  );
 });

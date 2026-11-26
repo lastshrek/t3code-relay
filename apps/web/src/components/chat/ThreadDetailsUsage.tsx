@@ -12,6 +12,7 @@ import {
   paceRemainingPercent,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
+import { formatCount } from "@t3tools/shared/usageFormat";
 import { formatDuration, limitsNotice } from "@t3tools/shared/usageLimitsCopy";
 import { Link } from "@tanstack/react-router";
 import { msg, useGT, useLocale, useMessages } from "gt-react";
@@ -177,6 +178,22 @@ export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowS
             </>
           }
         />
+        {usage.cost?.currency === "CRD" ? (
+          <UsageRow
+            label={gt("Credits used")}
+            fill={null}
+            tone={null}
+            muted
+            value={`${formatCount(usage.cost.amount, locale)}`}
+            tooltip={
+              <span className="text-foreground">
+                {gt("{count, plural, one {# credit used} other {# credits used}}", {
+                  count: usage.cost.amount,
+                })}
+              </span>
+            }
+          />
+        ) : null}
       </div>
     </ThreadDetailsSection>
   );

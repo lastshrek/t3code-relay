@@ -51,6 +51,11 @@ const IMPORT_EVENT_PREFIX = "agent-session-import:v2";
 const CLAUDE_SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+// WorkBuddy's CodeBuddy Code agent runs through the acpRegistry driver; its
+// source label names where the transcript came from, not the runtime driver.
+const importDriverKind = (source: AgentSessionSource): ProviderDriverKind =>
+  ProviderDriverKind.make(source === "workbuddy" ? "acpRegistry" : source);
+
 class AgentSessionUnresumableSessionError extends Schema.TaggedError<AgentSessionUnresumableSessionError>()(
   "AgentSessionUnresumableSessionError",
   {
@@ -299,7 +304,7 @@ const make = Effect.gen(function* () {
               providerSessionId: thread.providerSessionId,
             });
           }
-          const driver = ProviderDriverKind.make(thread.source);
+          const driver = importDriverKind(thread.source);
           // Pi resumes by session file path; its session UUID only names the thread.
           const nativeThreadId =
             thread.source === "pi" ? source.filePath : thread.providerSessionId;

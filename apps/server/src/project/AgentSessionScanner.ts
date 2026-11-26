@@ -135,13 +135,20 @@ const CodexTurnMetadata = Schema.Struct({
   turn_id: Schema.optional(Schema.Union([Schema.String, Schema.Null])),
 });
 
+// WorkBuddy (CodeBuddy) records put role/content at the top level and use epoch-ms timestamps.
+const WorkBuddyProviderData = Schema.Struct({
+  model: Schema.optional(Schema.String),
+  requestModelId: Schema.optional(Schema.String),
+});
+
 const TranscriptRecord = Schema.Struct({
   type: Schema.optional(Schema.String),
   // Pi entries form a tree through id/parentId; session_info entries carry its name.
   id: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.NullOr(Schema.String)),
   name: Schema.optional(Schema.String),
-  timestamp: Schema.optional(Schema.String),
+  // WorkBuddy timestamps are epoch milliseconds, not ISO strings.
+  timestamp: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
   cwd: Schema.optional(Schema.String),
   sessionId: Schema.optional(Schema.String),
   aiTitle: Schema.optional(Schema.String),
@@ -149,6 +156,10 @@ const TranscriptRecord = Schema.Struct({
   isSidechain: Schema.optional(Schema.Boolean),
   isMeta: Schema.optional(Schema.Boolean),
   isCompactSummary: Schema.optional(Schema.Boolean),
+  // WorkBuddy: `type: "message"` with role/content at the top level.
+  role: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.Union([Schema.String, Schema.Array(TranscriptContentBlock)])),
+  providerData: Schema.optional(WorkBuddyProviderData),
   message: Schema.optional(TranscriptMessage),
   payload: Schema.optional(
     Schema.Struct({
@@ -440,8 +451,13 @@ function extractText(
     .join("\n");
 }
 
-function normalizeTimestamp(value: string | undefined, fallback: string): string {
+function normalizeTimestamp(value: string | number | undefined, fallback: string): string {
   if (value === undefined) return fallback;
+  // WorkBuddy records use epoch milliseconds.
+  if (typeof value === "number") {
+    const fromMillis = DateTime.make(value);
+    return Option.isSome(fromMillis) ? DateTime.formatIso(fromMillis.value) : fallback;
+  }
   const parsed = DateTime.make(value);
   return Option.isSome(parsed) ? DateTime.formatIso(parsed.value) : fallback;
 }
@@ -558,6 +574,26 @@ function claudeVisibleText(record: DecodedTranscriptRecord) {
   return record.type === "user" ? claudeUserText(text) : { text, titleText: text };
 }
 
+// WorkBuddy wraps every user turn in injected context: a `<system-reminder>` block
+// (system prompt, tool list, memory reminders) and, after compaction, a
+// `<cb_summary>` block. The real prompt lives in `<user_query>`. Leaving the
+// wrapper in would turn titles and message bodies into walls of system prompt.
+const WORKBUDDY_INJECTED_BLOCK =
+  /<(system-reminder|cb_summary|conversation_history_summary)\b[\s\S]*?<\/\1>/gi;
+const WORKBUDDY_UNCLOSED_BLOCK =
+  /<(system-reminder|cb_summary|conversation_history_summary)\b[\s\S]*$/i;
+const WORKBUDDY_USER_QUERY = /<user_query>([\s\S]*?)<\/user_query>/i;
+
+function workbuddyVisibleText(
+  content: string | ReadonlyArray<typeof TranscriptContentBlock.Type> | undefined,
+): string {
+  const text = extractText(content);
+  const paired = text.replace(WORKBUDDY_INJECTED_BLOCK, "");
+  const query = paired.match(WORKBUDDY_USER_QUERY);
+  if (query !== null) return query[1]!.trim();
+  return paired.replace(WORKBUDDY_UNCLOSED_BLOCK, "").trim();
+}
+
 /** Saved titles can be the raw markup of a user turn, such as the command that opened the session. */
 function claudeTitle(title: string | undefined): string | undefined {
   const trimmed = title?.trim();
@@ -641,13 +677,23 @@ function parseAgentSessionRecords(
       ? ""
       : input.source === "pi"
         ? records.find((record) => record.type === "session")?.id?.trim() || input.fallbackSessionId
-        : (claudeFields.sessionId ?? input.fallbackSessionId);
+        : input.source === "workbuddy"
+          ? records.find((record) => record.sessionId?.trim())?.sessionId?.trim() ||
+            input.fallbackSessionId
+          : (claudeFields.sessionId ?? input.fallbackSessionId);
   // Pi titles a session by its latest session_info on any branch; an empty name clears it.
   const title =
     input.source === "pi"
       ? records.findLast((record) => record.type === "session_info")?.name?.trim() || null
-      : (claudeFields.title ?? null);
-  let model = claudeFields.model ?? null;
+      : input.source === "workbuddy"
+        ? records.findLast((record) => record.type === "ai-title")?.aiTitle?.trim() || null
+        : (claudeFields.title ?? null);
+  let model =
+    input.source === "workbuddy"
+      ? (records
+          .find((record) => record.providerData?.model?.trim())
+          ?.providerData?.model?.trim() ?? null)
+      : (claudeFields.model ?? null);
   let derivedTitle: string | undefined;
   // Names a session whose only request was a bare command, such as `/review`.
   let bareCommandTitle: string | undefined;
@@ -780,6 +826,23 @@ function parseAgentSessionRecords(
         },
         titleText,
       );
+      continue;
+    }
+    if (input.source === "workbuddy") {
+      // WorkBuddy records messages as `type: "message"` with a top-level role.
+      // Tool calls/results, reasoning, and file snapshots are separate rows and
+      // are not conversation turns, so they are skipped here.
+      if (record.type !== "message") continue;
+      if (record.role !== "user" && record.role !== "assistant") continue;
+      const text = workbuddyVisibleText(record.content);
+      if (text.length === 0) continue;
+      if (record.role === "assistant") hasClaudeModelReply = true;
+      retainMessage({
+        role: record.role,
+        text,
+        createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
+        codexResponseUser: false,
+      });
       continue;
     }
 
@@ -2460,19 +2523,34 @@ export const make = Effect.gen(function* () {
     let truncated = false;
     let metadataTruncated = false;
 
-    for (const source of ["claudeAgent", "codex", "pi", "opencode"] as const) {
+    for (const source of ["claudeAgent", "codex", "pi", "opencode", "workbuddy"] as const) {
+      // WorkBuddy sessions run through the `acpRegistry` driver's CodeBuddy Code agent.
+      // Match the configured instance by its agent id instead of by driver name.
+      const matchesInstance = (instance: ProviderInstanceConfig): boolean => {
+        if (source === "workbuddy") {
+          const agentId = (instance as { agentId?: unknown }).agentId;
+          return (
+            instance.driver === "acpRegistry" &&
+            typeof agentId === "string" &&
+            /codebuddy/i.test(agentId) &&
+            resolveProviderInstanceEnabled(instance)
+          );
+        }
+        return instance.driver === source && resolveProviderInstanceEnabled(instance);
+      };
       const instances: Array<{
         readonly instanceId: ProviderInstanceId;
         readonly config: ProviderInstanceConfig;
       }> = Object.entries(settings.providerInstances)
-        .filter(
-          ([, instance]) => instance.driver === source && resolveProviderInstanceEnabled(instance),
-        )
+        .filter(([, instance]) => matchesInstance(instance))
         .map(([instanceId, config]) => ({
           instanceId: ProviderInstanceId.make(instanceId),
           config,
         }));
-      if (!Object.hasOwn(settings.providerInstances, source)) {
+      // WorkBuddy has no standalone driver: only an explicitly configured
+      // codebuddy-code acpRegistry instance can supply sessions. Without one,
+      // skip the source entirely (and never scan the real home in tests).
+      if (source !== "workbuddy" && !Object.hasOwn(settings.providerInstances, source)) {
         const defaultInstance = {
           instanceId: ProviderInstanceId.make(source),
           config: { driver: ProviderDriverKind.make(source) },
@@ -2532,7 +2610,10 @@ export const make = Effect.gen(function* () {
         };
 
         let homePath: string;
-        if (source === "pi") {
+        if (source === "workbuddy") {
+          // WorkBuddy keeps its sessions under ~/.workbuddy/projects, next to the credentials.
+          homePath = path.join(homeDir, ".workbuddy");
+        } else if (source === "pi") {
           const environment = yield* mergeProviderInstanceEnvironment(
             instance.environment,
             hostEnvironment,
@@ -2573,7 +2654,7 @@ export const make = Effect.gen(function* () {
 
       const transcriptCandidates: Array<TranscriptCandidate> = [];
       const discover =
-        source === "claudeAgent"
+        source === "claudeAgent" || source === "workbuddy"
           ? discoverClaudeTranscripts
           : source === "codex"
             ? discoverCodexTranscripts

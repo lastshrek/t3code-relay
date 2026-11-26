@@ -1057,6 +1057,32 @@ it.effect("repeated imports reach linked-worktree sessions behind the scan budge
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(persistence, NodeServices.layer))),
 );
 
+it.effect("imports WorkBuddy threads bound to the acpRegistry driver", () =>
+  Effect.gen(function* () {
+    const codebuddySelection = {
+      instanceId: ProviderInstanceId.make("codebuddy-code"),
+      model: "codebuddy/primary-model",
+    };
+    const item = candidate(codebuddySelection, "wb-session-1", "workbuddy");
+    const importer = yield* makeImporter([item]);
+    expect(yield* importer.run).toEqual({ importedCount: 1, skippedCount: 0 });
+
+    const threadId = importId(item);
+    const records = yield* ProjectionStore.ProjectionStoreV2.pipe(
+      Effect.flatMap((projections) =>
+        projections.getThreadRecords(threadId, ["messages", "providerThreads"]),
+      ),
+    );
+    expect(records.thread.providerInstanceId).toBe(codebuddySelection.instanceId);
+    expect(records.providerThreads[0]?.driver).toBe(ProviderDriverKind.make("acpRegistry"));
+    expect(records.providerThreads[0]?.nativeThreadRef).toEqual({
+      driver: ProviderDriverKind.make("acpRegistry"),
+      nativeId: "wb-session-1",
+      strength: "strong",
+    });
+  }).pipe(Effect.scoped, Effect.provide(Layer.merge(persistence, NodeServices.layer))),
+);
+
 it.effect("imports OpenCode threads with native session bindings and model selection", () =>
   Effect.gen(function* () {
     const openCodeSelection = {

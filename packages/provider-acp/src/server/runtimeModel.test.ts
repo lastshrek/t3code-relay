@@ -895,6 +895,26 @@ describe("AcpRuntimeModel", () => {
     });
   });
 
+  it("maps empty-currency credits to the CRD sentinel", () => {
+    const usage = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "usage_update",
+        used: 100,
+        size: 1000,
+        cost: { amount: 2.5, currency: "" },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+    expect(usage.events[0]).toMatchObject({
+      _tag: "UsageUpdated",
+      usage: {
+        usedTokens: 100,
+        maxTokens: 1000,
+        cost: { amount: 2.5, currency: "CRD" },
+      },
+    });
+  });
+
   it("preserves message identity, usage, metadata, and non-text output", () => {
     const message = parseSessionUpdateEvent({
       sessionId: "session-1",

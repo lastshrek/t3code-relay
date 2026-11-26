@@ -3793,6 +3793,72 @@ describe("opencode", () => {
 });
 
 describe("parseAgentSessionTranscript", () => {
+  it("parses a WorkBuddy transcript, stripping injected context and using ai-title", () => {
+    const line = (record: unknown) => JSON.stringify(record);
+    const contents = [
+      line({
+        type: "session-meta",
+        sessionId: "wb-session",
+        timestamp: 1795008843896,
+        cwd: "/projects/demo",
+      }),
+      line({
+        type: "message",
+        role: "user",
+        sessionId: "wb-session",
+        timestamp: 1795008843900,
+        cwd: "/projects/demo",
+        content: [
+          {
+            type: "input_text",
+            text: "<system-reminder>You are an agent. Tool list follows.</system-reminder>\n<user_query>Fix the login bug</user_query>",
+          },
+        ],
+      }),
+      line({
+        type: "message",
+        role: "assistant",
+        sessionId: "wb-session",
+        timestamp: 1795008844000,
+        cwd: "/projects/demo",
+        providerData: { model: "claude-sonnet" },
+        content: [{ type: "output_text", text: "I fixed it." }],
+      }),
+      line({
+        type: "function_call",
+        sessionId: "wb-session",
+        timestamp: 1795008844100,
+        cwd: "/projects/demo",
+        callId: "call-1",
+        name: "Read",
+        arguments: "{}",
+      }),
+      line({
+        type: "ai-title",
+        sessionId: "wb-session",
+        timestamp: 1795008844200,
+        cwd: "/projects/demo",
+        aiTitle: "Login fix",
+      }),
+    ].join("\n");
+    const thread = AgentSessionScanner.parseAgentSessionTranscript({
+      contents,
+      source: "workbuddy",
+      providerInstanceId: ProviderInstanceId.make("codebuddy-code"),
+      fallbackSessionId: "wb-session",
+      lastActiveAtMs: 1795008844200,
+    });
+    expect(thread).not.toBeNull();
+    expect(thread?.source).toBe("workbuddy");
+    expect(thread?.providerSessionId).toBe("wb-session");
+    expect(thread?.title).toBe("Login fix");
+    expect(thread?.model).toBe("claude-sonnet");
+    expect(thread?.messages.map((message) => message.text)).toEqual([
+      "Fix the login bug",
+      "I fixed it.",
+    ]);
+  });
+
   it.each([false, true])(
     "handles the exact record limit and an interior blank overflow=%s",
     (overflow) => {

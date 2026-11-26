@@ -1650,12 +1650,24 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
     }
     case "usage_update": {
       const currency = upd.cost?.currency.trim().slice(0, 32);
+      // Some agents (e.g. WorkBuddy/CodeBuddy) report credits with an empty
+      // currency. The wire schema requires a non-empty 3-letter currency, so
+      // map that case to a sentinel the UI renders as credits, not dollars.
+      const amount = upd.cost?.amount;
+      const costCurrency =
+        currency && /^[A-Z]{3}$/.test(currency)
+          ? currency
+          : currency === "" && typeof amount === "number" && Number.isFinite(amount)
+            ? "CRD"
+            : undefined;
       events.push({
         _tag: "UsageUpdated",
         usage: {
           usedTokens: upd.used,
           ...(upd.size > 0 ? { maxTokens: upd.size } : {}),
-          ...(upd.cost && currency ? { cost: { amount: upd.cost.amount, currency } } : {}),
+          ...(costCurrency !== undefined && typeof amount === "number" && Number.isFinite(amount)
+            ? { cost: { amount, currency: costCurrency } }
+            : {}),
         },
         rawPayload: params,
       });

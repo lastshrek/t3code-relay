@@ -2185,7 +2185,16 @@ export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(funct
       args = distribution.args;
     }
 
+    // CodeBuddy Code defaults to the China site (matching the WorkBuddy desktop
+    // app). Keep it at the bottom of the merge so an explicit instance variable
+    // or the registry distribution can still override it.
+    const defaultEnvironment =
+      agent.id === "codebuddy-code" &&
+      effectiveEnvironment.CODEBUDDY_INTERNET_ENVIRONMENT === undefined
+        ? { CODEBUDDY_INTERNET_ENVIRONMENT: "internal" }
+        : {};
     const baseSpawnEnvironment = {
+      ...defaultEnvironment,
       ...effectiveEnvironment,
       ...distribution.env,
     };

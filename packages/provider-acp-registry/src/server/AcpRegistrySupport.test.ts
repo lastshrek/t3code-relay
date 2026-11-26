@@ -468,6 +468,63 @@ describe("AcpRegistrySupport", () => {
     ),
   );
 
+  it.effect("defaults CodeBuddy Code to the China site while allowing an override", () => {
+    const agent = {
+      ...makeAgent({
+        binary: {
+          "linux-x86_64": {
+            archive: archiveUrl,
+            cmd: "./bin/codebuddy",
+            args: ["--acp"],
+          },
+        },
+      }),
+      id: "codebuddy-code",
+    };
+    return Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cacheDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-acp-codebuddy-region-",
+      });
+      const commandPath = `${cacheDir}/codebuddy`;
+      yield* fileSystem.writeFileString(commandPath, "#!/bin/sh\n");
+      yield* fileSystem.chmod(commandPath, 0o755);
+      const resolver = yield* AcpRegistrySupport.makeAcpRegistryCatalog({
+        cacheDir,
+        toolsDir: `${cacheDir}/tools`,
+        registryUrl,
+      });
+
+      const withDefault = yield* resolver.resolve(
+        settings({ agentId: "codebuddy-code" }),
+        "/workspace",
+        {
+          PATH: cacheDir,
+        },
+      );
+      expect(withDefault.spawn.env).toMatchObject({
+        CODEBUDDY_INTERNET_ENVIRONMENT: "internal",
+      });
+
+      const overridden = yield* resolver.resolve(
+        settings({ agentId: "codebuddy-code" }),
+        "/workspace",
+        {
+          PATH: cacheDir,
+          CODEBUDDY_INTERNET_ENVIRONMENT: "public",
+        },
+      );
+      expect(overridden.spawn.env.CODEBUDDY_INTERNET_ENVIRONMENT).toBe("public");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        layerResolver((request) =>
+          Effect.succeed(HttpClientResponse.fromWeb(request, new Response(makeRegistry(agent)))),
+        ),
+      ),
+    );
+  });
+
   it.effect("resolves command overrides while preserving registry args and environment", () => {
     const agent = makeAgent({
       binary: {

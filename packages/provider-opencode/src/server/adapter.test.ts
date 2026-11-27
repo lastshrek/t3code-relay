@@ -2909,6 +2909,63 @@ describe("OpenCodeAdapterV2", () => {
     }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
   );
 
+  // A completed turn must not pin a later cross-provider switch, even when OpenCode
+  // never sends the idle event that would normally clear its busy session.
+  it.effect.each([
+    { case: "a session error", sessionID: "ses_root" as string | undefined },
+    { case: "a global error", sessionID: undefined },
+  ])("releases a busy turn after $case without an idle event", ({ sessionID }) =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      const push = (event: unknown) => Effect.promise(() => nativeEvents.push(event));
+      const root = "ses_root";
+      let promptId = "";
+      const harness = yield* makeOpenCodeRuntimeHarness("stale-busy", root, {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        session: {
+          create: async () => ({ data: { id: root, time: { created: 1, updated: 1 } } }),
+          promptAsync: async (input: { messageID: string }) => {
+            promptId = input.messageID;
+            return { data: true };
+          },
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+      });
+      const hasPendingBackgroundWork = harness.runtime.hasPendingBackgroundWork;
+      if (hasPendingBackgroundWork === undefined) {
+        return yield* Effect.die("OpenCode runtime must expose hasPendingBackgroundWork.");
+      }
+      yield* harness.startTurn();
+      const received = yield* harness.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* push({
+        type: "message.updated",
+        properties: {
+          sessionID: root,
+          info: { id: promptId, sessionID: root, role: "user", time: { created: 1 } },
+        },
+      });
+      yield* push({
+        type: "session.status",
+        properties: { sessionID: root, status: { type: "busy" } },
+      });
+      assert.isTrue(yield* hasPendingBackgroundWork, "a busy session must pin idle release");
+      yield* push({
+        type: "session.error",
+        properties: {
+          ...(sessionID === undefined ? {} : { sessionID }),
+          error: { name: "UnknownError", data: { message: "failed" } },
+        },
+      });
+      yield* Fiber.join(received);
+      assert.isFalse(yield* hasPendingBackgroundWork, "a settled turn must release idle");
+    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer))),
+  );
+
   // After a restart the adapter no longer holds the child, so its earlier turns come from OpenCode.
   it.effect.each([
     { case: "in memory", restarted: false },

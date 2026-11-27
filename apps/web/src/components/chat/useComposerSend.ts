@@ -1677,6 +1677,7 @@ export function useComposerSend(input: ComposerSendInput) {
       }
     }
 
+    let draftRestoredToastShown = false;
     if (failure !== null) {
       if (isLocalDraftThread && draftId && draftThread) {
         restoreFailedDraftThread(
@@ -1704,6 +1705,7 @@ export function useComposerSend(input: ComposerSendInput) {
         const failedText = sendSnapshot.draftText;
         const hasText = failedText.trim().length > 0;
         // An image-only message has nothing to copy, but its failure still needs a notice.
+        draftRestoredToastShown = true;
         toastManager.add(
           stackedThreadToast({
             type: "error",
@@ -1753,10 +1755,22 @@ export function useComposerSend(input: ComposerSendInput) {
       }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
-        setThreadError(
-          threadIdForSend,
-          thrownErrorMessage(error, m) ?? m(msg("Failed to send message.")),
-        );
+        const errorMessage = thrownErrorMessage(error, m) ?? m(msg("Failed to send message."));
+        setThreadError(threadIdForSend, errorMessage);
+        // The restored composer sits at the bottom; a banner alone looks like the click did nothing.
+        if (
+          !draftRestoredToastShown &&
+          (!draftId ||
+            (currentRouteThreadKeyRef.current === routeThreadKey && !backgroundDraftOpened))
+        ) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: m(msg("Message not sent")),
+              description: errorMessage,
+            }),
+          );
+        }
         if (
           draftId &&
           (backgroundDraftOpened || currentRouteThreadKeyRef.current !== routeThreadKey)
@@ -1768,7 +1782,7 @@ export function useComposerSend(input: ComposerSendInput) {
                 submissionIntent === "background"
                   ? m(msg("Background task failed"))
                   : m(msg("Could not start thread")),
-              description: thrownErrorMessage(error, m) ?? m(msg("Failed to send message.")),
+              description: errorMessage,
               actionProps: {
                 children: m(msg("Open draft")),
                 onClick: () => {

@@ -1717,6 +1717,8 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           )?.status;
           const errorOutcome = sessionErrorOutcomes.get(childSessionId);
           sessionErrorOutcomes.delete(childSessionId);
+          // A settled child must not pin a later cross-provider switch when no idle event follows.
+          busySessionIds.delete(childSessionId);
           const childOutcome =
             outcome ??
             errorOutcome ??
@@ -2322,6 +2324,9 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                     : providerRef(turn.nativeUserMessageId, "weak"),
               });
               state.activeTurn = null;
+              // OpenCode does not always emit session.idle after a terminal turn. Without this,
+              // the session stays "busy" forever and blocks later cross-provider switches.
+              busySessionIds.delete(state.nativeSessionId);
               if (!turn.isRoot) {
                 yield* emitProviderEvent({
                   type: "node.updated",
@@ -2834,6 +2839,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
         ) {
           const root = yield* rootAbort.pipe(Effect.result);
           const descendants = yield* abortDescendants(state.nativeSessionId).pipe(Effect.result);
+          busySessionIds.delete(state.nativeSessionId);
           yield* interruptLaunchedSubagents(state.nativeSessionId);
           if (root._tag === "Failure") return yield* root.failure;
           if (descendants._tag === "Failure") return yield* descendants.failure;
@@ -3192,6 +3198,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   event.properties.sessionID,
                   isMessageAbortedError(event) ? "interrupted" : "failed",
                 );
+                busySessionIds.delete(event.properties.sessionID);
               }
               const states =
                 event.properties.sessionID === undefined

@@ -71,7 +71,7 @@ import {
 import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeAntigravityProvider } from "../AntigravityProvider.ts";
-import { makeAntigravityUsageProbe } from "../antigravityUsageLimits.ts";
+import { makeAntigravityUsageProbe, readAntigravityCliEmail } from "../antigravityUsageLimits.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import {
@@ -576,9 +576,37 @@ export const AntigravityDriver: ProviderDriver<
       };
     });
 
+    const cliEmail = yield* readAntigravityCliEmail(profileDirectory).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.orElseSucceed(() => undefined),
+    );
+
+    // Idle instances let their Google access_token expire after an hour. A read-only
+    // `agy acp` handshake renews it through the stored refresh_token without any
+    // prompt, browser or prompt tokens. Errors are swallowed here: the probe will
+    // re-read the token file and report a clean "needs sign-in" state if renewal failed.
+    const renewCliToken: Effect.Effect<void, never, never> = Effect.scoped(
+      Effect.gen(function* () {
+        const renewScope = yield* Scope.fork(yield* Effect.scope);
+        yield* authFlow.withProcess(
+          Scope.close(renewScope, Exit.void),
+          Effect.gen(function* () {
+            const runtime = yield* makeDisposableRuntime({});
+            yield* runtime.start();
+          }),
+        );
+      }),
+    ).pipe(
+      Effect.tapError(() => Effect.logWarning("Could not silently renew Antigravity CLI sign-in.")),
+      Effect.orElseSucceed(() => undefined),
+      Effect.asVoid,
+    );
+
     const usage = yield* makeAntigravityUsageProbe({
       profileDirectory,
       authMethod: auth.authMethod,
+      renewCliToken,
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
@@ -591,7 +619,11 @@ export const AntigravityDriver: ProviderDriver<
       probe,
       probeUsage: usage.probe,
       clearUsage: usage.clear,
-      auth: { type: auth.authMethod, label: antigravityAuthLabel(auth.authMethod) },
+      auth: {
+        type: auth.authMethod,
+        label: antigravityAuthLabel(auth.authMethod),
+        ...(cliEmail ? { email: cliEmail } : {}),
+      },
       ...(rememberedRuntimeModes ? { rememberedRuntimeModes } : {}),
       rememberRuntimeModes: (modes) =>
         writeFileStringAtomically({

@@ -48,6 +48,8 @@ const CliToken = Schema.Struct({
     refresh_token: Schema.optional(Schema.String),
     expiry: Schema.optional(Schema.String),
   }),
+  // The 1.5.x CLI stores the signed-in Google account here, at the top level.
+  id_token_email: Schema.optional(Schema.String),
 });
 const TokenResponse = Schema.Struct({
   access_token: Schema.NonEmptyString,
@@ -90,6 +92,21 @@ const Models = Schema.Struct({
 
 const decodeTokenFile = Schema.decodeEffect(Schema.fromJsonString(TokenFile));
 const decodeCliToken = Schema.decodeEffect(Schema.fromJsonString(CliToken));
+
+/** Reads the signed-in Google email from the CLI token file, if present. */
+export const readAntigravityCliEmail = Effect.fn("readAntigravityCliEmail")(function* (
+  profileDirectory: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const tokenPath = path.join(profileDirectory, "antigravity-acp", "antigravity-oauth-token");
+  if (!(yield* fs.exists(tokenPath))) return undefined;
+  const stored = yield* fs.readFileString(tokenPath);
+  return yield* decodeCliToken(stored).pipe(
+    Effect.map((decoded) => decoded.id_token_email?.trim() || undefined),
+    Effect.orElseSucceed(() => undefined),
+  );
+});
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
 const decodeUserInfo = Schema.decodeUnknownEffect(UserInfo);
 const decodeSummary = Schema.decodeUnknownEffect(Summary);
@@ -317,10 +334,14 @@ function modelWindows(models: typeof Models.Type) {
   return [...windows.values()];
 }
 
+const CLI_TOKEN_RENEW_COOLDOWN_MS = 5 * 60_000;
+
 export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(function* (input: {
   readonly profileDirectory: string;
   readonly authMethod: AntigravitySettings["authMethod"];
   readonly readKeyringSecret?: Effect.Effect<string | undefined, AntigravityKeyringError>;
+  /** Silently renews an expired CLI token via `agy acp` (no prompt, no browser). */
+  readonly renewCliToken?: Effect.Effect<void, never, never>;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -339,6 +360,8 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
     | { fingerprint: string; account: string; accessToken: string; expiresAt: number }
     | undefined;
   let generation = 0;
+  // Avoid re-launching `agy` on every health check after a failed renewal.
+  let lastCliRenew: { readonly key: string; readonly at: number } | undefined;
 
   const request = (request: HttpClientRequest.HttpClientRequest) =>
     client.execute(request).pipe(
@@ -360,19 +383,46 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
     if (!(yield* fs.exists(tokenPath))) {
       cached = undefined;
       // Google account instances bypass the keyring, whose one entry every profile shares.
-      const stored = (yield* fs.exists(cliTokenPath))
-        ? yield* fs.readFileString(cliTokenPath)
-        : input.authMethod === "oauth-business"
-          ? yield* readKeyringSecret
-          : undefined;
-      if (stored === undefined) {
+      const readStored = Effect.gen(function* () {
+        const stored = (yield* fs.exists(cliTokenPath))
+          ? yield* fs.readFileString(cliTokenPath)
+          : input.authMethod === "oauth-business"
+            ? yield* readKeyringSecret
+            : undefined;
+        return stored === undefined ? undefined : yield* decodeCliToken(stored);
+      });
+      const cliStored = yield* readStored;
+      if (cliStored === undefined) {
         return makeUnavailableUsageLimits({
           checkedAt,
           reason: "unsupported",
           message: "Sign in with Google to see Antigravity limits.",
         });
       }
-      const { token } = yield* decodeCliToken(stored);
+      let { token, id_token_email: cliEmail } = cliStored;
+      const tokenIsExpired = !(Date.parse(token.expiry ?? "") > now + 60_000);
+      if (tokenIsExpired && token.refresh_token?.trim() && input.renewCliToken) {
+        // Cooldown keyed by the refresh token so a failing renewal is not retried every poll.
+        const renewKey = yield* sha256(`agy-renew\0${token.refresh_token}`);
+        const inCooldown =
+          lastCliRenew !== undefined &&
+          lastCliRenew.key === renewKey &&
+          now - lastCliRenew.at < CLI_TOKEN_RENEW_COOLDOWN_MS;
+        if (!inCooldown) {
+          lastCliRenew = { key: renewKey, at: now };
+          // Success or failure, re-read the token file: `agy` writes the renewed token itself.
+          yield* input.renewCliToken.pipe(
+            Effect.timeout("25 seconds"),
+            Effect.asVoid,
+            Effect.orElseSucceed(() => undefined),
+          );
+          const after = yield* readStored;
+          if (after !== undefined && Date.parse(after.token.expiry ?? "") > now + 60_000) {
+            token = after.token;
+            cliEmail = after.id_token_email ?? cliEmail;
+          }
+        }
+      }
       if (!(Date.parse(token.expiry ?? "") > now + 60_000)) {
         return makeUnavailableUsageLimits({
           checkedAt,
@@ -382,14 +432,19 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
         });
       }
       accessToken = token.access_token;
-      account = yield* request(
-        HttpClientRequest.get("https://www.googleapis.com/oauth2/v2/userinfo").pipe(
-          HttpClientRequest.setHeaders({ Authorization: `Bearer ${accessToken}` }),
-        ),
-      ).pipe(
-        Effect.flatMap(antigravityAccountFingerprint),
-        Effect.catch(() => sha256(`antigravity-cli\0${token.refresh_token || accessToken}`)),
-      );
+      // Prefer the CLI's stored Google email so multiple instances are distinguishable;
+      // fall back to the fingerprint when userinfo is unavailable (e.g. keyring sign-in).
+      const emailAccount = cliEmail?.trim() ? `email:${cliEmail.trim()}` : undefined;
+      account =
+        emailAccount ??
+        (yield* request(
+          HttpClientRequest.get("https://www.googleapis.com/oauth2/v2/userinfo").pipe(
+            HttpClientRequest.setHeaders({ Authorization: `Bearer ${accessToken}` }),
+          ),
+        ).pipe(
+          Effect.flatMap(antigravityAccountFingerprint),
+          Effect.catch(() => sha256(`antigravity-cli\0${token.refresh_token || accessToken}`)),
+        ));
     } else {
       const token = yield* fs.readFileString(tokenPath).pipe(Effect.flatMap(decodeTokenFile));
       projectId = token.project_id;
@@ -484,7 +539,8 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
   });
   const probe = read.pipe(
     Effect.provideService(Digest.Digest, crypto),
-    Effect.timeout("30 seconds"),
+    // Leave room for one `agy` renewal handshake when a CLI token is expired.
+    Effect.timeout("45 seconds"),
     Effect.catch(() =>
       Effect.gen(function* () {
         return makeUnavailableUsageLimits({
@@ -499,6 +555,7 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
     probe,
     clear: Effect.sync(() => {
       cached = undefined;
+      lastCliRenew = undefined;
       generation++;
     }),
   };

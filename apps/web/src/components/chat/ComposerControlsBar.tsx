@@ -179,17 +179,20 @@ export function ComposerControlsBar(props: {
     getModelDisabledReason,
   } = props;
   const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
+  const showPhase = Boolean(props.interactionMode && props.onInteractionModeChange);
   const {
     accessDisplay,
     showModeBlock,
     hiddenBlockCount: restingHiddenBlockCount,
     hiddenBlockIds: hiddenRestingBlockIds,
     overflowShowsPermissions,
+    overflowShowsPhase,
     pickerOwnsModeShortcut,
   } = resolveComposerControlsOwnership({
     matchesDefault: accessMatchesDefault || props.permissionsShownInStrip,
     collapsed: composerControlsCollapsed,
     measuredHiddenBlockCount,
+    showPhase,
   });
   const controlSize = composerControlsCollapsed ? "xs" : "sm";
   const gt = useGT();
@@ -368,7 +371,11 @@ export function ComposerControlsBar(props: {
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             // Permissions join the overflow only when their normal home is in it.
             showPermissions={overflowShowsPermissions}
+            showPhase={overflowShowsPhase}
+            interactionMode={props.interactionMode}
+            activeProfileName={props.activeProfileName}
             onRuntimeModeChange={handleRuntimeModeChange}
+            onInteractionModeChange={props.onInteractionModeChange}
           />
         </div>
       </>

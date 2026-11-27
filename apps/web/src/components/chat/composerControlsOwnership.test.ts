@@ -47,4 +47,38 @@ describe("resolveComposerControlsOwnership", () => {
     });
     expect(result.accessDisplay).toBe("icon");
   });
+
+  it("gives an overflowed phase block to the overflow menu", () => {
+    const result = resolveComposerControlsOwnership({
+      ...base,
+      showPhase: true,
+      measuredHiddenBlockCount: 1,
+    });
+    expect(result.hiddenBlockIds).toEqual(["phase"]);
+    expect(result.overflowShowsPhase).toBe(true);
+    expect(result.overflowShowsPermissions).toBe(false);
+  });
+
+  it("overflows the phase before the permissions block", () => {
+    const result = resolveComposerControlsOwnership({
+      ...base,
+      matchesDefault: false,
+      showPhase: true,
+      measuredHiddenBlockCount: 1,
+    });
+    expect(result.hiddenBlockIds).toEqual(["phase"]);
+    expect(result.hiddenBlockCount).toBe(1);
+  });
+
+  it("puts both blocks in the overflow menu when neither fits", () => {
+    const result = resolveComposerControlsOwnership({
+      ...base,
+      matchesDefault: false,
+      showPhase: true,
+      measuredHiddenBlockCount: 2,
+    });
+    expect(result.hiddenBlockIds).toEqual(["mode", "phase"]);
+    expect(result.overflowShowsPermissions).toBe(true);
+    expect(result.overflowShowsPhase).toBe(true);
+  });
 });

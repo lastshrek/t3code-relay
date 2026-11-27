@@ -5643,5 +5643,19 @@
   "eb287395a09cd288": "Verbindungs-Traces senden",
   "6787f93bbf6ce0b6": "Hilft dem T3 Code-Team, Verbindungsprobleme zu beheben. Traces enthalten Zeiten, Fehlertypen, eine ID für diese App-Sitzung und die App-Version, nie deine Threads, Prompts oder deinen Code. Du kannst das unter Einstellungen > Über T3 Code > Diagnose ändern.",
   "0b1e4aecbd38e0cf": "Wenn die App über {product} eine Verbindung zu einem Computer herstellt, sendet sie dem T3 Code-Team, wie lange jeder Schritt gedauert hat, den Fehlertyp, eine ID für diese App-Sitzung und die App-Version. Traces enthalten nie deine Threads, Prompts oder deinen Code.",
-  "e0856d6a402ad821": "Die Richtlinie von {organization} erlaubt keine Worktree-Layout-Befehle von Projekten."
+  "e0856d6a402ad821": "Die Richtlinie von {organization} erlaubt keine Worktree-Layout-Befehle von Projekten.",
+  "c0e6c8b010ef5d8a": "Model profiles",
+  "bde5b555b71a2444": "Use the selected model for both phases.",
+  "22fdc0e6eb838283": "Thinking: {think} · Execution: {execute}",
+  "32f17c266137acbf": "Use a fallback model at usage limits",
+  "3dce60b2778d4022": "Switch to another model in the active profile when one hits its quota.",
+  "2e0fe56fcf788e76": "model profile",
+  "f4b300d8554eacdb": "thinking",
+  "8f582018cb5e4927": "fallback",
+  "26e0f1275998b2e9": "Think",
+  "27b011104e0bd113": "Execute",
+  "bba0036b9768768c": "Thinking phase, switch to execution",
+  "16606a8754952026": "Execution phase, switch to thinking",
+  "f5cbbc2e9468cba9": "Could not continue with the fallback model.",
+  "4cabd22cef56540d": "Use {model}"
 }

@@ -5622,5 +5622,19 @@
   "eb287395a09cd288": "연결 트레이스 보내기",
   "6787f93bbf6ce0b6": "T3 Code 팀이 연결 문제를 해결하는 데 도움이 됩니다. 트레이스에는 소요 시간, 오류 유형, 이 앱 세션의 ID, 앱 버전이 포함되며 스레드, 프롬프트, 코드는 포함되지 않습니다. 설정 > T3 Code 정보 > 진단에서 변경할 수 있습니다.",
   "0b1e4aecbd38e0cf": "앱이 {product}를 통해 컴퓨터에 연결하면 각 단계에 걸린 시간, 오류 유형, 이 앱 세션의 ID, 앱 버전을 T3 Code 팀에 보냅니다. 트레이스에는 스레드, 프롬프트, 코드가 포함되지 않습니다.",
-  "e0856d6a402ad821": "{organization}의 정책상 프로젝트의 워크트리 레이아웃 명령을 사용할 수 없습니다."
+  "e0856d6a402ad821": "{organization}의 정책상 프로젝트의 워크트리 레이아웃 명령을 사용할 수 없습니다.",
+  "c0e6c8b010ef5d8a": "Model profiles",
+  "bde5b555b71a2444": "Use the selected model for both phases.",
+  "22fdc0e6eb838283": "Thinking: {think} · Execution: {execute}",
+  "32f17c266137acbf": "Use a fallback model at usage limits",
+  "3dce60b2778d4022": "Switch to another model in the active profile when one hits its quota.",
+  "2e0fe56fcf788e76": "model profile",
+  "f4b300d8554eacdb": "thinking",
+  "8f582018cb5e4927": "fallback",
+  "26e0f1275998b2e9": "Think",
+  "27b011104e0bd113": "Execute",
+  "bba0036b9768768c": "Thinking phase, switch to execution",
+  "16606a8754952026": "Execution phase, switch to thinking",
+  "f5cbbc2e9468cba9": "Could not continue with the fallback model.",
+  "4cabd22cef56540d": "Use {model}"
 }

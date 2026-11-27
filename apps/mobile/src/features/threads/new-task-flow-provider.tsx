@@ -1,7 +1,11 @@
 import { ActiveNewTaskContext } from "../../state/active-new-task";
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import { msg, useMessages } from "gt-react-native";
-import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import { exhaustedUsageWindow, resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import {
+  resolveActiveModelProfile,
+  resolvePhaseModelSelection,
+} from "@t3tools/shared/modelProfiles";
 import { useNowMinuteMs } from "../../lib/clock";
 import { m, type MessageResolver } from "../../i18n/messages";
 import * as Dialog from "../../components/ui/Dialog";
@@ -10,6 +14,7 @@ import React, { useRef, useState } from "react";
 import type {
   EnvironmentId,
   ModelSelection,
+  ProviderInteractionMode,
   ProviderOptionSelection,
   RuntimeMode,
   ServerProvider,
@@ -173,6 +178,8 @@ type NewTaskFlowContextValue = {
   readonly availableBranches: ReadonlyArray<VcsRef>;
   readonly currentCheckoutBranchName: string | null;
   readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly setInteractionMode: (value: ProviderInteractionMode) => void;
   readonly expandedProvider: string | null;
   readonly environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
@@ -454,6 +461,31 @@ export function NewTaskFlowProvider(
     defaultRuntimeMode,
     managedPolicy,
   );
+  const interactionMode = selectedProjectDraft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
+  const activeModelProfile = selectedEnvironmentServerConfig
+    ? resolveActiveModelProfile(
+        selectedEnvironmentServerConfig.settings,
+        selectedEnvironmentServerConfig.settings.activeModelProfileId,
+      )
+    : undefined;
+  const resolvePhaseSelection = (mode: ProviderInteractionMode) =>
+    resolvePhaseModelSelection({
+      profile: activeModelProfile,
+      phase: mode === "plan" ? "think" : "execute",
+      providers: selectedEnvironmentServerConfig?.providers ?? [],
+      now: modelSelectionNow,
+      settings: selectedEnvironmentServerConfig?.settings,
+    });
+  const setInteractionMode = (value: ProviderInteractionMode) => {
+    if (!selectedProjectDraftKey) return;
+    updateComposerDraftSettings(selectedProjectDraftKey, { interactionMode: value });
+    if (!activeModelProfile) return;
+    const list =
+      value === "plan" ? activeModelProfile.thinkModels : activeModelProfile.executeModels;
+    const selection = resolvePhaseSelection(value).selection ?? list[0];
+    if (selection)
+      updateComposerDraftSettings(selectedProjectDraftKey, { modelSelection: selection });
+  };
 
   // Antigravity keeps unavailable selections so sign-out or a catalog change
   // cannot switch the user's model.
@@ -792,7 +824,7 @@ export function NewTaskFlowProvider(
     }
     const draft = getComposerDraftSnapshot(selectedProjectDraftKey);
     const text = draft.text.trim();
-    const draftModelSelection =
+    let draftModelSelection =
       resolveSelectableModelSelection(
         selectedEnvironmentServerConfig,
         draft.modelSelection ?? null,
@@ -811,6 +843,29 @@ export function NewTaskFlowProvider(
     ) {
       return null;
     }
+    const sendInteractionMode = draft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
+    const currentSelection = draftModelSelection;
+    if (
+      activeModelProfile &&
+      selectedEnvironmentServerConfig?.settings.autoFallbackOnUsageLimit === true &&
+      exhaustedUsageWindow(
+        selectedEnvironmentServerConfig.providers.find(
+          (provider) => provider.instanceId === currentSelection.instanceId,
+        ),
+        modelSelectionNow,
+        currentSelection.model,
+      )
+    ) {
+      const fallback = resolvePhaseModelSelection({
+        profile: activeModelProfile,
+        phase: sendInteractionMode === "plan" ? "think" : "execute",
+        providers: selectedEnvironmentServerConfig.providers,
+        now: modelSelectionNow,
+        settings: selectedEnvironmentServerConfig.settings,
+        tried: new Set([`${currentSelection.instanceId}\0${currentSelection.model}`]),
+      });
+      if (fallback.selection) draftModelSelection = fallback.selection;
+    }
     const workspaceSelection = resolveWorkspaceSelection(draft.workspaceSelection);
     const mode = workspaceSelection.mode;
     return {
@@ -827,7 +882,7 @@ export function NewTaskFlowProvider(
         defaultRuntimeMode,
         managedPolicy,
       ),
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      interactionMode: sendInteractionMode,
       creation: {
         projectId: selectedProject.id,
         projectTitle: selectedProject.title,
@@ -941,6 +996,8 @@ export function NewTaskFlowProvider(
     availableBranches,
     currentCheckoutBranchName,
     runtimeMode,
+    interactionMode,
+    setInteractionMode,
     expandedProvider,
     environments,
     selectedProject,

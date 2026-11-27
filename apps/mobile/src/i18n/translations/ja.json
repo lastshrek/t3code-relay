@@ -5616,5 +5616,19 @@
   "eb287395a09cd288": "接続トレースを送信",
   "6787f93bbf6ce0b6": "T3 Code チームが接続の問題を修正するのに役立ちます。トレースには所要時間、エラーの種類、このアプリセッションの ID、アプリのバージョンが含まれ、スレッド、プロンプト、コードは含まれません。設定 > T3 Code について > 診断 で変更できます。",
   "0b1e4aecbd38e0cf": "アプリが {product} 経由でコンピューターに接続すると、各ステップの所要時間、エラーの種類、このアプリセッションの ID、アプリのバージョンを T3 Code チームに送信します。トレースにスレッド、プロンプト、コードは含まれません。",
-  "e0856d6a402ad821": "{organization} のポリシーでは、プロジェクトのワークツリーレイアウトコマンドは許可されていません。"
+  "e0856d6a402ad821": "{organization} のポリシーでは、プロジェクトのワークツリーレイアウトコマンドは許可されていません。",
+  "c0e6c8b010ef5d8a": "Model profiles",
+  "bde5b555b71a2444": "Use the selected model for both phases.",
+  "22fdc0e6eb838283": "Thinking: {think} · Execution: {execute}",
+  "32f17c266137acbf": "Use a fallback model at usage limits",
+  "3dce60b2778d4022": "Switch to another model in the active profile when one hits its quota.",
+  "2e0fe56fcf788e76": "model profile",
+  "f4b300d8554eacdb": "thinking",
+  "8f582018cb5e4927": "fallback",
+  "26e0f1275998b2e9": "Think",
+  "27b011104e0bd113": "Execute",
+  "bba0036b9768768c": "Thinking phase, switch to execution",
+  "16606a8754952026": "Execution phase, switch to thinking",
+  "f5cbbc2e9468cba9": "Could not continue with the fallback model.",
+  "4cabd22cef56540d": "Use {model}"
 }

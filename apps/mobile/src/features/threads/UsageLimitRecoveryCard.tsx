@@ -3,13 +3,17 @@ import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import { AsyncResult } from "effect/reactivity";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { limitRecoveryOwnsSnooze } from "@t3tools/client-runtime/state/thread-execution";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { MessageId, type EnvironmentId } from "@t3tools/contracts";
 import {
   CHATGPT_USAGE_LIMIT_CODE,
   CHATGPT_USAGE_URL,
   CHATGPT_WORKSPACE_ADMIN_REQUEST,
   CHATGPT_WORKSPACE_USAGE_LIMIT_CODE,
 } from "@t3tools/shared/usageLimits";
+import {
+  resolveActiveModelProfile,
+  resolvePhaseModelSelection,
+} from "@t3tools/shared/modelProfiles";
 import * as Clipboard from "expo-clipboard";
 import { T, useGT } from "gt-react-native";
 import { m } from "../../i18n/messages";
@@ -18,7 +22,9 @@ import { Pressable, View } from "react-native";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { AppText as Text } from "../../components/ui/AppText";
-import { useDeadlinePassed } from "../../lib/clock";
+import { useDeadlinePassed, useNowMinuteMs } from "../../lib/clock";
+import { uuidv4 } from "../../lib/uuid";
+import { useEnvironmentServerConfig } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 
@@ -31,6 +37,23 @@ export function UsageLimitRecoveryCard({
 }) {
   const gt = useGT();
   const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata);
+  const startTurn = useAtomCommand(threadEnvironment.startTurn);
+  const serverConfig = useEnvironmentServerConfig(environmentId);
+  const nowMinuteMs = useNowMinuteMs();
+  const activeModelProfile = serverConfig
+    ? resolveActiveModelProfile(serverConfig.settings, serverConfig.settings.activeModelProfileId)
+    : undefined;
+  const fallbackSelection =
+    activeModelProfile && serverConfig?.settings.autoFallbackOnUsageLimit === true
+      ? resolvePhaseModelSelection({
+          profile: activeModelProfile,
+          phase: thread.interactionMode === "plan" ? "think" : "execute",
+          providers: serverConfig.providers,
+          now: nowMinuteMs,
+          settings: serverConfig.settings,
+          projectId: thread.projectId ?? null,
+        }).selection
+      : null;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const resetAt = thread.runtime?.usageLimitResetAt ?? null;
@@ -116,6 +139,52 @@ export function UsageLimitRecoveryCard({
       setError(errorDisplayMessage(cause, m) ?? gt("Could not change limit recovery."));
     }
   }
+  async function switchModel() {
+    if (!fallbackSelection || !runId) return;
+    setPending(true);
+    setError(null);
+    const cleared = await updateMetadata({
+      environmentId,
+      input: {
+        threadId: thread.id,
+        limitRecovery: {
+          runId,
+          resetAt: resetAt ?? thread.updatedAt,
+          autoResume: false,
+          snooze: false,
+        },
+      },
+    });
+    if (AsyncResult.isFailure(cleared)) {
+      setPending(false);
+      const cause = squashAtomCommandFailure(cleared);
+      setError(errorDisplayMessage(cause, m) ?? gt("Could not change limit recovery."));
+      return;
+    }
+    const continued = await startTurn({
+      environmentId,
+      input: {
+        creationSource: "mobile",
+        threadId: thread.id,
+        manualContinuationOfRunId: runId,
+        modelSelection: fallbackSelection,
+        message: {
+          messageId: MessageId.make(uuidv4()),
+          role: "user",
+          text: "",
+          attachments: [],
+        },
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        dispatchMode: "start",
+      },
+    });
+    setPending(false);
+    if (AsyncResult.isFailure(continued)) {
+      const cause = squashAtomCommandFailure(continued);
+      setError(errorDisplayMessage(cause, m) ?? gt("Could not continue with the fallback model."));
+    }
+  }
   const action = workspaceLimit
     ? {
         label: gt("Copy request for admin"),
@@ -185,9 +254,16 @@ export function UsageLimitRecoveryCard({
                     "Usage limit reached. The provider did not report a reset time. Retry manually when your limit is available.",
                   )}
         </Text>
-        {chatGptLimit || canSchedule ? (
+        {chatGptLimit || canSchedule || fallbackSelection ? (
           // The margins cancel the 44pt touch height so the links sit 8pt under the text.
           <View className="-mb-3 -mt-2 flex-row flex-wrap gap-x-4">
+            {fallbackSelection ? (
+              <RecoveryAction
+                label={gt("Use {model}", { model: fallbackSelection.model })}
+                disabled={pending}
+                onPress={() => void switchModel()}
+              />
+            ) : null}
             {chatGptLimit ? (
               <RecoveryAction
                 label={action.label}

@@ -1,7 +1,7 @@
 /**
- * Where the permissions chip shows, whether the mode block overflows, and which control answers
- * the composer.mode shortcut. The model picker's footer always holds Permissions, so the chip
- * only shows while the mode differs from the default. The rule: composer.mode has one target.
+ * Where the permissions chip shows, whether the mode and phase blocks overflow, and which control
+ * answers the composer.mode shortcut. The model picker's footer always holds Permissions, so the
+ * chip only shows while the mode differs from the default. The rule: composer.mode has one target.
  */
 export function resolveComposerControlsOwnership(input: {
   /** Permissions hide while the mode is the default, or while the new-thread strip names it. */
@@ -9,6 +9,8 @@ export function resolveComposerControlsOwnership(input: {
   readonly collapsed: boolean;
   /** How many trailing blocks the width measurement moved into the overflow menu. */
   readonly measuredHiddenBlockCount: number;
+  /** Whether the thinking/execution block is present after the permissions block. */
+  readonly showPhase?: boolean;
 }) {
   const accessDisplay = input.matchesDefault
     ? ("hidden" as const)
@@ -16,15 +18,22 @@ export function resolveComposerControlsOwnership(input: {
       ? ("icon" as const)
       : ("label" as const);
   const showModeBlock = accessDisplay !== "hidden";
-  const modeHidden = showModeBlock && input.measuredHiddenBlockCount > 0;
-  const hiddenBlockIds = modeHidden ? (["mode"] as const) : ([] as const);
-  const overflowShowsPermissions = modeHidden;
+  const blockIds = [
+    ...(showModeBlock ? (["mode"] as const) : []),
+    ...(input.showPhase ? (["phase"] as const) : []),
+  ];
+  const hiddenCount = Math.min(Math.max(0, input.measuredHiddenBlockCount), blockIds.length);
+  const hiddenBlockIds: ReadonlyArray<string> = blockIds.slice(blockIds.length - hiddenCount);
+  const overflowShowsPermissions = hiddenBlockIds.includes("mode");
+  const overflowShowsPhase = hiddenBlockIds.includes("phase");
+  const modeHidden = showModeBlock && overflowShowsPermissions;
   return {
     accessDisplay,
     showModeBlock,
-    hiddenBlockCount: hiddenBlockIds.length,
+    hiddenBlockCount: hiddenCount,
     hiddenBlockIds,
     overflowShowsPermissions,
+    overflowShowsPhase,
     /** Without a visible chip or an overflow menu holding it, the model picker answers composer.mode. */
     pickerOwnsModeShortcut: !overflowShowsPermissions && (accessDisplay === "hidden" || modeHidden),
   };

@@ -394,6 +394,48 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     />
                   ))}
                 </SettingsSection>
+                {!projectSelected ? (
+                  <SettingsSection
+                    title={gt("Model profiles")}
+                    footer={managed("activeModelProfileId", "autoFallbackOnUsageLimit")}
+                  >
+                    {[
+                      {
+                        id: "",
+                        label: gt("Off"),
+                        description: gt("Use the selected model for both phases."),
+                      },
+                      ...(uniform("modelProfiles") ?? []).map((profile) => ({
+                        id: profile.id,
+                        label: profile.name,
+                        description: gt("Thinking: {think} · Execution: {execute}", {
+                          think: profile.thinkModels[0]?.model ?? gt("Off"),
+                          execute: profile.executeModels[0]?.model ?? gt("Off"),
+                        }),
+                      })),
+                    ].map((choice, index) => (
+                      <SettingsChoiceRow
+                        key={choice.id || "off"}
+                        label={choice.label}
+                        description={choice.description}
+                        selected={uniform("activeModelProfileId") === choice.id}
+                        separated={index > 0}
+                        disabled={disabledFor("activeModelProfileId")}
+                        onPress={() => write({ activeModelProfileId: choice.id })}
+                      />
+                    ))}
+                    <SettingsSwitchRow
+                      icon="bolt.circle"
+                      label={gt("Use a fallback model at usage limits")}
+                      subtitle={gt(
+                        "Switch to another model in the active profile when one hits its quota.",
+                      )}
+                      value={uniform("autoFallbackOnUsageLimit")}
+                      disabled={disabledFor("autoFallbackOnUsageLimit")}
+                      onValueChange={(value) => write({ autoFallbackOnUsageLimit: value })}
+                    />
+                  </SettingsSection>
+                ) : null}
                 <SettingsSection title={gt("Preview browser")}>
                   <SettingsSwitchRow
                     icon="globe"

@@ -16,6 +16,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type ProviderInteractionMode,
   type ServerConfig as T3ServerConfig,
   type UsageLimitsReport,
 } from "@t3tools/contracts";
@@ -24,6 +25,7 @@ import {
   hasProviderUsageLimits,
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
+import { resolveActiveModelProfile } from "@t3tools/shared/modelProfiles";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import { msg, T, useGT, useMessages } from "gt-react-native";
 import type { ReactNode } from "react";
@@ -163,6 +165,7 @@ export interface ThreadComposerProps {
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly sendBlockedReason?: string | null;
+  readonly onChangeInteractionMode?: (mode: ProviderInteractionMode) => void;
   readonly interactionLocked?: boolean;
   readonly draftKey?: string;
   readonly queuedEdit?: {
@@ -476,6 +479,31 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     draftMessage,
     Platform.OS === "ios" && isFocused,
   );
+  const activeModelProfile = props.serverConfig
+    ? resolveActiveModelProfile(
+        props.serverConfig.settings,
+        props.serverConfig.settings.activeModelProfileId,
+      )
+    : undefined;
+  const thinking = props.selectedThread.interactionMode === "plan";
+  const phaseControl =
+    activeModelProfile && props.onChangeInteractionMode ? (
+      <ComposerInlineControl
+        size={usesLargeControls ? "large" : "regular"}
+        icon={thinking ? "brain" : "bolt.circle"}
+        label={thinking ? gt("Think") : gt("Execute")}
+        selected={thinking}
+        iconOnly={!compactEditor.isExpanded}
+        showChevron={false}
+        disabled={!props.canOperateThread || isSubmissionLocked}
+        accessibilityLabel={
+          thinking
+            ? gt("Thinking phase, switch to execution")
+            : gt("Execution phase, switch to thinking")
+        }
+        onPress={() => props.onChangeInteractionMode?.(thinking ? "default" : "plan")}
+      />
+    ) : null;
   const showsCompactDictation = isVoiceInputPresented;
   const isToolbarVisible = isVoiceInputPresented;
   const hasEditingAttachments =
@@ -1039,6 +1067,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   className="min-w-0 shrink flex-row items-center"
                   entering={compactEditor.toolbarControlsEntering}
                 >
+                  {phaseControl}
                   {compactControl}
                   {modelControl}
                 </Animated.View>

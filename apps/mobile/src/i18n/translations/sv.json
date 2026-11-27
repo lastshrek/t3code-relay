@@ -5643,5 +5643,19 @@
   "eb287395a09cd288": "Skicka anslutningsspårningar",
   "6787f93bbf6ce0b6": "Hjälper T3 Code-teamet att åtgärda anslutningsproblem. Spårningar innehåller tider, feltyper, ett ID för den här appsessionen och appversionen, aldrig dina trådar, prompter eller din kod. Du kan ändra det under Inställningar > Om T3 Code > Diagnostik.",
   "0b1e4aecbd38e0cf": "När appen ansluter till en dator via {product} skickar den hur lång tid varje steg tog, feltypen, ett ID för den här appsessionen och appversionen till T3 Code-teamet. Spårningar innehåller aldrig dina trådar, prompter eller din kod.",
-  "e0856d6a402ad821": "Policyn för {organization} tillåter inte projekts layoutkommandon för worktrees."
+  "e0856d6a402ad821": "Policyn för {organization} tillåter inte projekts layoutkommandon för worktrees.",
+  "c0e6c8b010ef5d8a": "Model profiles",
+  "bde5b555b71a2444": "Use the selected model for both phases.",
+  "22fdc0e6eb838283": "Thinking: {think} · Execution: {execute}",
+  "32f17c266137acbf": "Use a fallback model at usage limits",
+  "3dce60b2778d4022": "Switch to another model in the active profile when one hits its quota.",
+  "2e0fe56fcf788e76": "model profile",
+  "f4b300d8554eacdb": "thinking",
+  "8f582018cb5e4927": "fallback",
+  "26e0f1275998b2e9": "Think",
+  "27b011104e0bd113": "Execute",
+  "bba0036b9768768c": "Thinking phase, switch to execution",
+  "16606a8754952026": "Execution phase, switch to thinking",
+  "f5cbbc2e9468cba9": "Could not continue with the fallback model.",
+  "4cabd22cef56540d": "Use {model}"
 }

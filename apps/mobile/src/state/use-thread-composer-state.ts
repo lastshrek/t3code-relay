@@ -33,10 +33,16 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type EnvironmentId,
   type ModelSelection,
+  type ProviderInteractionMode,
   type RuntimeMode,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
+import {
+  resolveActiveModelProfile,
+  resolvePhaseModelSelection,
+} from "@t3tools/shared/modelProfiles";
+import { exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
 
 import {
   parseCodexFeedbackCommand,
@@ -99,6 +105,7 @@ import {
   scheduleUnusedComposerAttachmentCleanup,
   setComposerDraftText,
   setFreshSessionPending,
+  updateComposerDraftSettings,
   useComposerDraft,
   useComposerDraftSettings,
 } from "./use-composer-drafts";
@@ -355,8 +362,11 @@ export function useThreadComposerState(input: {
     serverConfig?.providers ?? [],
   );
   const runtimeMode = threadDraftSettings.runtimeMode ?? selectedThread?.runtimeMode ?? null;
-  // Plan mode is not offered to users; every send runs in build mode.
-  const interactionMode = selectedThread ? DEFAULT_PROVIDER_INTERACTION_MODE : null;
+  const interactionMode: ProviderInteractionMode | null = selectedThread
+    ? (threadDraftSettings.interactionMode ??
+      selectedThread.interactionMode ??
+      DEFAULT_PROVIDER_INTERACTION_MODE)
+    : null;
   const canSwitchThreadProvider = threadAllowsProviderSwitch({
     thread: selectedThreadShell,
     projection: selectedThreadProjection?.projection,
@@ -474,6 +484,29 @@ export function useThreadComposerState(input: {
         })
       : null;
   const nowMinuteMs = useNowMinuteMs();
+  const activeModelProfile = serverConfig
+    ? resolveActiveModelProfile(serverConfig.settings, serverConfig.settings.activeModelProfileId)
+    : undefined;
+  const resolvePhaseSelection = (mode: ProviderInteractionMode) =>
+    resolvePhaseModelSelection({
+      profile: activeModelProfile,
+      phase: mode === "plan" ? "think" : "execute",
+      providers: serverConfig?.providers ?? [],
+      now: nowMinuteMs,
+      settings: serverConfig?.settings,
+      projectId: selectedThread?.projectId ?? null,
+    });
+  const onChangeInteractionMode = (mode: ProviderInteractionMode) => {
+    if (!selectedThreadShell) return;
+    const key = activeComposerDraftKey(selectedThreadShell);
+    updateComposerDraftSettings(key, { interactionMode: mode });
+    if (!activeModelProfile) return;
+    const resolved = resolvePhaseSelection(mode);
+    const list =
+      mode === "plan" ? activeModelProfile.thinkModels : activeModelProfile.executeModels;
+    const selection = resolved.selection ?? list[0];
+    if (selection) updateComposerDraftSettings(key, { modelSelection: selection });
+  };
   const compactTokens =
     selectedDraft.freshContext === true
       ? null
@@ -662,8 +695,33 @@ export function useThreadComposerState(input: {
     if (text.length === 0 && attachments.length === 0) {
       return null;
     }
-    const modelSelection = draft.modelSelection ?? thread.modelSelection;
+    let modelSelection = draft.modelSelection ?? thread.modelSelection;
     const serverConfig = selectedEnvironmentRuntime?.serverConfig;
+    const sendInteractionMode =
+      draft.interactionMode ?? thread.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
+    if (
+      modelSelection &&
+      activeModelProfile &&
+      serverConfig?.settings.autoFallbackOnUsageLimit === true &&
+      exhaustedUsageWindow(
+        serverConfig.providers.find(
+          (provider) => provider.instanceId === modelSelection.instanceId,
+        ),
+        nowMinuteMs,
+        modelSelection.model,
+      )
+    ) {
+      const fallback = resolvePhaseModelSelection({
+        profile: activeModelProfile,
+        phase: sendInteractionMode === "plan" ? "think" : "execute",
+        providers: serverConfig.providers,
+        now: nowMinuteMs,
+        settings: serverConfig.settings,
+        projectId: thread.projectId,
+        tried: new Set([`${modelSelection.instanceId}\0${modelSelection.model}`]),
+      });
+      if (fallback.selection) modelSelection = fallback.selection;
+    }
     const modelUnavailable =
       selectedEnvironmentRuntime?.connectionState === "connected" &&
       isModelSelectionUnavailable(serverConfig, modelSelection, thread.projectId);
@@ -906,7 +964,7 @@ export function useThreadComposerState(input: {
       context: draft.context,
       modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      interactionMode: sendInteractionMode,
       ...(compactBeforeSend
         ? { compactBeforeSend, dispatchMode: "queue" as const }
         : followUpDispatchMode === null
@@ -1010,7 +1068,7 @@ export function useThreadComposerState(input: {
       attachments: [],
       modelSelection,
       runtimeMode: thread.runtimeMode,
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      interactionMode: thread.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
       createdAt: metadata.createdAt,
     });
     return messageId;
@@ -1080,6 +1138,7 @@ export function useThreadComposerState(input: {
     canSwitchThreadProvider,
     runtimeMode,
     interactionMode,
+    onChangeInteractionMode,
     activeThreadBusy,
     interruptibleRunId,
     onChangeDraftMessage,

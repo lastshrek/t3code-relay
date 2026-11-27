@@ -5717,5 +5717,19 @@
   "eb287395a09cd288": "Отправлять трассировки подключения",
   "6787f93bbf6ce0b6": "Помогает команде T3 Code устранять проблемы с подключением. Трассировки содержат время, типы ошибок, ID этого сеанса приложения и версию приложения, но никогда ваши треды, промпты или код. Это можно изменить в разделе Настройки > О T3 Code > Диагностика.",
   "0b1e4aecbd38e0cf": "Когда приложение подключается к компьютеру через {product}, оно отправляет команде T3 Code длительность каждого шага, тип ошибки, ID этого сеанса приложения и версию приложения. Трассировки никогда не содержат ваши треды, промпты или код.",
-  "e0856d6a402ad821": "Политика {organization} запрещает команды раскладки рабочих деревьев проектов."
+  "e0856d6a402ad821": "Политика {organization} запрещает команды раскладки рабочих деревьев проектов.",
+  "c0e6c8b010ef5d8a": "Model profiles",
+  "bde5b555b71a2444": "Use the selected model for both phases.",
+  "22fdc0e6eb838283": "Thinking: {think} · Execution: {execute}",
+  "32f17c266137acbf": "Use a fallback model at usage limits",
+  "3dce60b2778d4022": "Switch to another model in the active profile when one hits its quota.",
+  "2e0fe56fcf788e76": "model profile",
+  "f4b300d8554eacdb": "thinking",
+  "8f582018cb5e4927": "fallback",
+  "26e0f1275998b2e9": "Think",
+  "27b011104e0bd113": "Execute",
+  "bba0036b9768768c": "Thinking phase, switch to execution",
+  "16606a8754952026": "Execution phase, switch to thinking",
+  "f5cbbc2e9468cba9": "Could not continue with the fallback model.",
+  "4cabd22cef56540d": "Use {model}"
 }

@@ -45,6 +45,7 @@ import {
 import type {
   EnvironmentId,
   MessageId,
+  ProviderInteractionMode,
   RuntimeRequestId,
   ScopedThreadRef,
   ServerConfig as T3ServerConfig,
@@ -298,6 +299,7 @@ export interface ThreadDetailScreenProps {
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
   readonly onOpenConnectionEditor: () => void;
+  readonly onChangeInteractionMode?: (mode: ProviderInteractionMode) => void;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftMedia: () => Promise<void>;
   readonly onPickDraftFiles: () => Promise<void>;
@@ -1981,6 +1983,7 @@ function ThreadDetailBody(
                               : null
                         }
                         interactionLocked={props.draftMode?.interactionLocked}
+                        onChangeInteractionMode={props.onChangeInteractionMode}
                         draftKey={props.composerDraftKey ?? undefined}
                         followUpBehavior={
                           props.activePendingApprovals.length > 0 &&

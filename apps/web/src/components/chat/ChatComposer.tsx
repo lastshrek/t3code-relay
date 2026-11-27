@@ -2611,6 +2611,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submitComposer,
       promptSuggestion: offeredPromptSuggestion,
       dismissPromptSuggestion,
+      ...(activeModelProfile
+        ? { onTogglePhase: () => handlePhaseChange(composerPhase === "plan" ? "default" : "plan") }
+        : {}),
     })(key, event, isTaskItem);
   };
 

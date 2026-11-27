@@ -99,6 +99,8 @@ export function composerCommandKeyHandler(input: {
   /** Predicted next prompt that Tab fills into an empty composer; Escape dismisses it. */
   readonly promptSuggestion: string | null;
   readonly dismissPromptSuggestion: () => void;
+  /** Toggles thinking/execution phase on a plain Tab, after higher-priority editor behaviors. */
+  readonly onTogglePhase?: (() => void) | undefined;
 }) {
   const {
     keybindings,
@@ -138,6 +140,7 @@ export function composerCommandKeyHandler(input: {
     submitComposer,
     promptSuggestion,
     dismissPromptSuggestion,
+    onTogglePhase,
   } = input;
 
   // The composer persists across threads. A recall from thread A must not
@@ -299,7 +302,24 @@ export function composerCommandKeyHandler(input: {
     }
     if (key === "Enter" && isTaskItem) return false;
     if (key === "Enter" || (key === "Tab" && !event.shiftKey)) {
-      return applyListEdit(event, key === "Enter" ? listContinuationForEnter : listIndentForTab);
+      if (applyListEdit(event, key === "Enter" ? listContinuationForEnter : listIndentForTab)) {
+        return true;
+      }
+      // Plain Tab falls through to the phase toggle only after the editor behaviors above decline it.
+      if (
+        key === "Tab" &&
+        onTogglePhase &&
+        !isLiteralPendingAnswer &&
+        !event.altKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.isComposing &&
+        event.keyCode !== 229
+      ) {
+        onTogglePhase();
+        return true;
+      }
+      return false;
     }
     return false;
   };

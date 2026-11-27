@@ -22,6 +22,7 @@ import {
 } from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { cn } from "~/lib/utils";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { resolveComposerTraitsInput } from "./composerProviderState";
 import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -52,26 +53,32 @@ function ComposerPhaseControl({
 }) {
   const gt = useGT();
   const thinking = mode === "plan";
+  const phaseLabel = thinking
+    ? gt("Thinking phase, switch to execution")
+    : gt("Execution phase, switch to thinking");
   return (
-    <button
-      type="button"
-      aria-label={
-        thinking
-          ? gt("Thinking phase, switch to execution")
-          : gt("Execution phase, switch to thinking")
-      }
-      onClick={() => onChange(thinking ? "default" : "plan")}
-      className={cn(
-        "flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium outline-none",
-        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-        thinking
-          ? "bg-accent text-foreground"
-          : "border border-border/60 text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {thinking ? <T>Think</T> : <T>Execute</T>}
-      {profileName ? <span className="max-w-12 truncate opacity-60">{profileName}</span> : null}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={phaseLabel}
+            onClick={() => onChange(thinking ? "default" : "plan")}
+            className={cn(
+              "flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium outline-none",
+              "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              thinking
+                ? "bg-accent text-foreground"
+                : "border border-border/60 text-muted-foreground hover:text-foreground",
+            )}
+          />
+        }
+      >
+        {thinking ? <T>Think</T> : <T>Execute</T>}
+        {profileName ? <span className="max-w-12 truncate opacity-60">{profileName}</span> : null}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{gt("{phase} (Tab)", { phase: phaseLabel })}</TooltipPopup>
+    </Tooltip>
   );
 }
 

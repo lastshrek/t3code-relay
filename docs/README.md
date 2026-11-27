@@ -1,5 +1,7 @@
 # T3 Code docs
 
+中文用户可先阅读 [中文 README](../README.md)，其中列出了本定制分支与原版的区别。
+
 ## Using T3 Code
 
 - [Install T3 Code](./user/install.md)

@@ -45,6 +45,7 @@ import type {
 import {
   EnvironmentRequestInvalidError,
   AuthOrchestrationOperateScope,
+  AuthSettingsWriteScope,
   clampManagedRuntimeMode,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -52,7 +53,12 @@ import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import { resolvePhaseModelSelection } from "@t3tools/shared/modelProfiles";
 import * as Schema from "effect/Schema";
 import { formatComposerModelMention } from "@t3tools/client-runtime/composer-model-mentions";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
@@ -281,7 +287,14 @@ import { Kbd } from "../ui/kbd";
 import { useSoftwareKeyboardOpen } from "../../hooks/useSoftwareKeyboardOpen";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { usePanelAnimationSettings } from "../../panelAnimations";
-import { readEnvironmentScope, readPreparedConnection } from "../../state/session";
+import {
+  readEnvironmentScope,
+  readPreparedConnection,
+  useEnvironmentScope,
+} from "../../state/session";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { serverEnvironment } from "../../state/server";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 import { useComposerRestingTransition } from "./useComposerRestingTransition";
 import {
@@ -2696,23 +2709,77 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       : expandedControlsIconOnlyBlockCount;
   // Optional "model profiles": one click switches the working phase and applies
   // that phase's first usable model. Without a configured profile nothing changes.
+  const nowMinute = useNowMinute();
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
+  const canChangeModelProfile = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
   const activeModelProfile =
     settings.modelProfiles?.find((profile) => profile.id === settings.activeModelProfileId) ??
     undefined;
   const composerPhase = composerDraft?.interactionMode ?? "default";
+  const resolveProfileModel = (
+    profile: NonNullable<typeof activeModelProfile>,
+    mode: ProviderInteractionMode,
+  ) => {
+    const list = mode === "plan" ? profile.thinkModels : profile.executeModels;
+    return (
+      resolvePhaseModelSelection({
+        profile,
+        phase: mode === "plan" ? "think" : "execute",
+        providers: providerStatuses,
+        now: Date.parse(`${nowMinute}:00.000Z`),
+        settings,
+        projectId: activeProjectId ?? null,
+      }).selection ?? list[0]
+    );
+  };
   const handlePhaseChange = useStableCallback((mode: ProviderInteractionMode) => {
     const store = useComposerDraftStore.getState();
     store.setInteractionMode(composerDraftTarget, mode);
     if (!activeModelProfile) return;
-    const list =
-      mode === "plan" ? activeModelProfile.thinkModels : activeModelProfile.executeModels;
-    const selection = list[0];
+    const selection = resolveProfileModel(activeModelProfile, mode);
     if (selection) {
       store.setModelSelection(composerDraftTarget, selection, {
         explicit: true,
         replaceOptions: true,
       });
     }
+  });
+  const handleModelProfileSelect = useStableCallback(async (profileId: string) => {
+    if (!canChangeModelProfile) {
+      toastManager.add({
+        type: "warning",
+        title: gt("Setting not saved"),
+        description: gt(
+          "This connection lacks permission to change settings on the selected environment.",
+        ),
+      });
+      return;
+    }
+    const profile = settings.modelProfiles?.find((entry) => entry.id === profileId);
+    if (profile) {
+      const selection = resolveProfileModel(profile, composerPhase);
+      if (selection) {
+        useComposerDraftStore.getState().setModelSelection(composerDraftTarget, selection, {
+          explicit: true,
+          replaceOptions: true,
+        });
+      }
+    }
+    const result = await updateSettings({
+      environmentId,
+      input: { patch: { activeModelProfileId: profileId } },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: gt("Model profile not saved"),
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+  const handleManageModelProfiles = useStableCallback(() => {
+    void navigate({ to: "/settings/threads", hash: "model-profiles" });
   });
 
   const composerControls = (
@@ -2767,6 +2834,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             interactionMode: composerPhase,
             onInteractionModeChange: handlePhaseChange,
             activeProfileName: activeModelProfile.name,
+          }
+        : {})}
+      {...(settings.modelProfiles && settings.modelProfiles.length > 0
+        ? {
+            modelProfiles: settings.modelProfiles,
+            activeModelProfileId: settings.activeModelProfileId ?? "",
+            canChangeModelProfile,
+            onSelectModelProfile: handleModelProfileSelect,
+            onManageModelProfiles: handleManageModelProfiles,
           }
         : {})}
     />

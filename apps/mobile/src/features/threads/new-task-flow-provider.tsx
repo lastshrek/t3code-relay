@@ -20,12 +20,15 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import {
+  AuthSettingsWriteScope,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   repositoryGroupingKeyOf,
   ThreadId,
 } from "@t3tools/contracts";
+import { readEnvironmentScope } from "../../state/session";
+import { serverEnvironment } from "../../state/server";
 import { threadContextsOutsideEnvironment } from "@t3tools/shared/composerContextReferences";
 import { isTriagePrompt, replaceTriagePlaybookLink } from "@t3tools/shared/triagePrompt";
 import * as Arr from "effect/Array";
@@ -180,6 +183,7 @@ type NewTaskFlowContextValue = {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly setInteractionMode: (value: ProviderInteractionMode) => void;
+  readonly setActiveModelProfile: (profileId: string) => void;
   readonly expandedProvider: string | null;
   readonly environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
@@ -485,6 +489,38 @@ export function NewTaskFlowProvider(
     const selection = resolvePhaseSelection(value).selection ?? list[0];
     if (selection)
       updateComposerDraftSettings(selectedProjectDraftKey, { modelSelection: selection });
+  };
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "model profile update",
+    reportFailure: true,
+  });
+  const setActiveModelProfile = (profileId: string) => {
+    if (!selectedProject || !selectedProjectDraftKey) return;
+    const environmentId = selectedProject.environmentId;
+    if (!readEnvironmentScope(environmentId, AuthSettingsWriteScope)) return;
+    if (profileId) {
+      const profile = selectedEnvironmentServerConfig?.settings.modelProfiles.find(
+        (entry) => entry.id === profileId,
+      );
+      if (profile) {
+        const phase = interactionMode === "plan" ? "think" : "execute";
+        const list = phase === "think" ? profile.thinkModels : profile.executeModels;
+        const resolved = resolvePhaseModelSelection({
+          profile,
+          phase,
+          providers: selectedEnvironmentServerConfig?.providers ?? [],
+          now: modelSelectionNow,
+          settings: selectedEnvironmentServerConfig?.settings,
+        });
+        const selection = resolved.selection ?? list[0];
+        if (selection)
+          updateComposerDraftSettings(selectedProjectDraftKey, { modelSelection: selection });
+      }
+    }
+    void updateSettings({
+      environmentId,
+      input: { patch: { activeModelProfileId: profileId } },
+    });
   };
 
   // Antigravity keeps unavailable selections so sign-out or a catalog change
@@ -998,6 +1034,7 @@ export function NewTaskFlowProvider(
     runtimeMode,
     interactionMode,
     setInteractionMode,
+    setActiveModelProfile,
     expandedProvider,
     environments,
     selectedProject,

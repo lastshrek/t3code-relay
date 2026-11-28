@@ -300,6 +300,7 @@ export interface ThreadDetailScreenProps {
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
   readonly onOpenConnectionEditor: () => void;
   readonly onChangeInteractionMode?: (mode: ProviderInteractionMode) => void;
+  readonly onSelectModelProfile?: (profileId: string) => void;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftMedia: () => Promise<void>;
   readonly onPickDraftFiles: () => Promise<void>;
@@ -1984,6 +1985,7 @@ function ThreadDetailBody(
                         }
                         interactionLocked={props.draftMode?.interactionLocked}
                         onChangeInteractionMode={props.onChangeInteractionMode}
+                        onSelectModelProfile={props.onSelectModelProfile}
                         draftKey={props.composerDraftKey ?? undefined}
                         followUpBehavior={
                           props.activePendingApprovals.length > 0 &&

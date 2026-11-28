@@ -1,3 +1,4 @@
+import type { MenuAction } from "@react-native-menu/menu";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
@@ -166,6 +167,7 @@ export interface ThreadComposerProps {
   readonly projectCwd: string | null;
   readonly sendBlockedReason?: string | null;
   readonly onChangeInteractionMode?: (mode: ProviderInteractionMode) => void;
+  readonly onSelectModelProfile?: (profileId: string) => void;
   readonly interactionLocked?: boolean;
   readonly draftKey?: string;
   readonly queuedEdit?: {
@@ -503,6 +505,52 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         }
         onPress={() => props.onChangeInteractionMode?.(thinking ? "default" : "plan")}
       />
+    ) : null;
+  const modelProfiles = props.serverConfig?.settings.modelProfiles ?? [];
+  const activeProfileId = props.serverConfig?.settings.activeModelProfileId ?? "";
+  const profileModelName = (selection: ModelSelection | undefined) => {
+    if (!selection) return gt("None");
+    const provider = props.serverConfig?.providers.find(
+      (entry) => entry.instanceId === selection.instanceId,
+    );
+    return (
+      provider?.models.find((model) => model.slug === selection.model)?.name ?? selection.model
+    );
+  };
+  const profileActions: MenuAction[] = [
+    ...modelProfiles.map((profile) => ({
+      id: profile.id,
+      title: profile.name,
+      subtitle: gt("Think: {think} · Execute: {execute}", {
+        think: profileModelName(profile.thinkModels[0]),
+        execute: profileModelName(profile.executeModels[0]),
+      }),
+      state: (profile.id === activeProfileId ? "on" : "off") as "on" | "off",
+    })),
+    {
+      id: "",
+      title: gt("Off"),
+      subtitle: gt("Choose models manually"),
+      state: (activeProfileId === "" ? "on" : "off") as "on" | "off",
+    },
+  ];
+  const profileControl =
+    modelProfiles.length > 0 && props.onSelectModelProfile ? (
+      <Menu
+        accessibilityLabel={gt("Switch model profile")}
+        actions={profileActions}
+        onPressAction={({ nativeEvent }) => props.onSelectModelProfile?.(nativeEvent.event)}
+      >
+        <ComposerInlineControl
+          size={usesLargeControls ? "large" : "regular"}
+          icon="slider.horizontal.3"
+          label={gt("Model profiles")}
+          iconOnly
+          showChevron={false}
+          disabled={!props.canOperateThread}
+          accessibilityLabel={gt("Switch model profile")}
+        />
+      </Menu>
     ) : null;
   const showsCompactDictation = isVoiceInputPresented;
   const isToolbarVisible = isVoiceInputPresented;
@@ -1068,6 +1116,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   entering={compactEditor.toolbarControlsEntering}
                 >
                   {phaseControl}
+                  {profileControl}
                   {compactControl}
                   {modelControl}
                 </Animated.View>

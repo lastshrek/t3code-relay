@@ -1107,6 +1107,7 @@ function ThreadRouteContent(
           isSavingQueuedEdit={composer.isSavingQueuedEdit}
           onCancelQueuedRunEdit={composer.cancelQueuedRunEdit}
           onChangeInteractionMode={composer.onChangeInteractionMode}
+          onSelectModelProfile={composer.onSelectModelProfile}
           onRemoveQueuedEditAttachment={composer.onRemoveQueuedEditAttachment}
           environmentId={selectedThread.environmentId}
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}

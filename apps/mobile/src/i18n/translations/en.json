@@ -5659,5 +5659,9 @@
   "bba0036b9768768c": "Thinking phase, switch to execution",
   "16606a8754952026": "Execution phase, switch to thinking",
   "f5cbbc2e9468cba9": "Could not continue with the fallback model.",
-  "4cabd22cef56540d": "Use {model}"
+  "4cabd22cef56540d": "Use {model}",
+  "f86d1b3defd75cea": "None",
+  "a798a7954dfbbf6a": "Think: {think} · Execute: {execute}",
+  "2e0ae725e01c156d": "Choose models manually",
+  "0a01750c55a396d5": "Switch model profile"
 }

@@ -11,6 +11,8 @@ export function resolveComposerControlsOwnership(input: {
   readonly measuredHiddenBlockCount: number;
   /** Whether the thinking/execution block is present after the permissions block. */
   readonly showPhase?: boolean;
+  /** Whether the model-profile switch block is the last resting block. */
+  readonly showProfile?: boolean;
 }) {
   const accessDisplay = input.matchesDefault
     ? ("hidden" as const)
@@ -21,11 +23,13 @@ export function resolveComposerControlsOwnership(input: {
   const blockIds = [
     ...(showModeBlock ? (["mode"] as const) : []),
     ...(input.showPhase ? (["phase"] as const) : []),
+    ...(input.showProfile ? (["profile"] as const) : []),
   ];
   const hiddenCount = Math.min(Math.max(0, input.measuredHiddenBlockCount), blockIds.length);
   const hiddenBlockIds: ReadonlyArray<string> = blockIds.slice(blockIds.length - hiddenCount);
   const overflowShowsPermissions = hiddenBlockIds.includes("mode");
   const overflowShowsPhase = hiddenBlockIds.includes("phase");
+  const overflowShowsProfile = hiddenBlockIds.includes("profile");
   const modeHidden = showModeBlock && overflowShowsPermissions;
   return {
     accessDisplay,
@@ -34,6 +38,7 @@ export function resolveComposerControlsOwnership(input: {
     hiddenBlockIds,
     overflowShowsPermissions,
     overflowShowsPhase,
+    overflowShowsProfile,
     /** Without a visible chip or an overflow menu holding it, the model picker answers composer.mode. */
     pickerOwnsModeShortcut: !overflowShowsPermissions && (accessDisplay === "hidden" || modeHidden),
   };

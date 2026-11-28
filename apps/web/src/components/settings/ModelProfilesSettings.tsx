@@ -11,6 +11,7 @@ import { randomUUID } from "../../lib/utils";
 
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
+import { DraftInput } from "../ui/draft-input";
 import { Switch } from "../ui/switch";
 import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
@@ -70,7 +71,7 @@ export function ModelProfilesSettings() {
         ...profiles,
         {
           id,
-          name: gt("New profile"),
+          name: gt("New profile", { $context: "model profile" }),
           thinkModels: [emptySelection(first.instanceId, first.models[0]?.slug ?? "default")],
           executeModels: [emptySelection(first.instanceId, first.models[0]?.slug ?? "default")],
         },
@@ -172,7 +173,19 @@ export function ModelProfilesSettings() {
         profiles.map((profile) => (
           <SettingsRow
             key={profile.id}
-            title={profile.name}
+            title={
+              <DraftInput
+                nativeInput
+                size="sm"
+                className="w-full max-w-56"
+                aria-label={gt("Rename {profile}", { profile: profile.name })}
+                value={profile.name}
+                onCommit={(next) => {
+                  const name = next.trim();
+                  if (name && name !== profile.name) updateProfile(profile.id, { name });
+                }}
+              />
+            }
             description={
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-xs text-muted-foreground">

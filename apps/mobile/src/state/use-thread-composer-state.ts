@@ -2,7 +2,7 @@ import { useComposerAttachmentActions } from "./use-composer-attachment-actions"
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import * as Effect from "effect/Effect";
 import * as Dialog from "../components/ui/Dialog";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, AuthSettingsWriteScope } from "@t3tools/contracts";
 import { readEnvironmentScope } from "./session";
 import { useAtomValue } from "@effect/atom-react";
 import { compactBeforeSendTokens } from "@t3tools/client-runtime/state/context-window";
@@ -144,6 +144,7 @@ import { useThreadSelection } from "./use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdsAtom, useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
+import { serverEnvironment } from "./server";
 import { useAtomCommand } from "./use-atom-command";
 
 const EMPTY_QUEUE_WORKFLOW_ATOM = Atom.make<null>(null).pipe(
@@ -256,6 +257,10 @@ export function useThreadComposerState(input: {
   const editQueuedRun = useAtomCommand(threadEnvironment.editQueuedRun, {
     label: "edit queued message",
     reportFailure: false,
+  });
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "model profile update",
+    reportFailure: true,
   });
   const [isSavingQueuedEdit, setIsSavingQueuedEdit] = useState(false);
   const savingQueuedEditRef = useRef(false);
@@ -506,6 +511,33 @@ export function useThreadComposerState(input: {
       mode === "plan" ? activeModelProfile.thinkModels : activeModelProfile.executeModels;
     const selection = resolved.selection ?? list[0];
     if (selection) updateComposerDraftSettings(key, { modelSelection: selection });
+  };
+  const onSelectModelProfile = (profileId: string) => {
+    if (!selectedThreadShell) return;
+    const environmentId = selectedThreadShell.environmentId;
+    if (!readEnvironmentScope(environmentId, AuthSettingsWriteScope)) return;
+    const key = activeComposerDraftKey(selectedThreadShell);
+    if (profileId) {
+      const profile = serverConfig?.settings.modelProfiles.find((entry) => entry.id === profileId);
+      if (profile) {
+        const phase = interactionMode === "plan" ? "think" : "execute";
+        const list = phase === "think" ? profile.thinkModels : profile.executeModels;
+        const resolved = resolvePhaseModelSelection({
+          profile,
+          phase,
+          providers: serverConfig?.providers ?? [],
+          now: nowMinuteMs,
+          settings: serverConfig?.settings,
+          projectId: selectedThread?.projectId ?? null,
+        });
+        const selection = resolved.selection ?? list[0];
+        if (selection) updateComposerDraftSettings(key, { modelSelection: selection });
+      }
+    }
+    void updateSettings({
+      environmentId,
+      input: { patch: { activeModelProfileId: profileId } },
+    });
   };
   const compactTokens =
     selectedDraft.freshContext === true
@@ -1139,6 +1171,7 @@ export function useThreadComposerState(input: {
     runtimeMode,
     interactionMode,
     onChangeInteractionMode,
+    onSelectModelProfile,
     activeThreadBusy,
     interruptibleRunId,
     onChangeDraftMessage,

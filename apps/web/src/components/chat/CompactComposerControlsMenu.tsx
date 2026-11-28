@@ -1,8 +1,17 @@
-import type { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { ModelProfile, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { T, useGT } from "gt-react";
 import { memo, useRef } from "react";
 import { EllipsisIcon } from "lucide-react";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
@@ -15,11 +24,17 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   showPhase?: boolean | undefined;
   interactionMode?: ProviderInteractionMode | undefined;
   activeProfileName?: string | undefined;
+  showProfile?: boolean | undefined;
+  modelProfiles?: ReadonlyArray<ModelProfile> | undefined;
+  activeModelProfileId?: string | undefined;
+  canChangeModelProfile?: boolean | undefined;
   size?: "sm" | "xs";
   /** Close the portaled popup when its trigger hides. */
   hidden?: boolean;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onInteractionModeChange?: ((mode: ProviderInteractionMode) => void) | undefined;
+  onSelectModelProfile?: ((profileId: string) => void) | undefined;
+  onManageModelProfiles?: (() => void) | undefined;
 }) {
   const gt = useGT();
   const composerFloatingLayerProps = useComposerMenuProps();
@@ -60,6 +75,37 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
                 </span>
               ) : null}
             </MenuItem>
+            {props.showPermissions && !props.showProfile ? <MenuSeparator /> : null}
+          </>
+        ) : null}
+        {props.showProfile && props.onSelectModelProfile ? (
+          <>
+            {props.showPhase ? <MenuSeparator /> : null}
+            <MenuGroupLabel>
+              <T>Model profiles</T>
+            </MenuGroupLabel>
+            <MenuRadioGroup
+              value={props.activeModelProfileId ?? ""}
+              onValueChange={props.onSelectModelProfile}
+            >
+              {(props.modelProfiles ?? []).map((profile) => (
+                <MenuRadioItem
+                  key={profile.id}
+                  value={profile.id}
+                  disabled={props.canChangeModelProfile === false}
+                >
+                  {profile.name}
+                </MenuRadioItem>
+              ))}
+              <MenuRadioItem value="" disabled={props.canChangeModelProfile === false}>
+                <T>Off (choose models manually)</T>
+              </MenuRadioItem>
+            </MenuRadioGroup>
+            {props.onManageModelProfiles ? (
+              <MenuItem onClick={props.onManageModelProfiles}>
+                <T>Manage model profiles…</T>
+              </MenuItem>
+            ) : null}
             {props.showPermissions ? <MenuSeparator /> : null}
           </>
         ) : null}

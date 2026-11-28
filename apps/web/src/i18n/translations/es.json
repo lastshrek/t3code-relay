@@ -12927,5 +12927,13 @@
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
   "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
-  "f863cd4b31adda91": "{phase} (Tab)"
+  "f863cd4b31adda91": "{phase} (Tab)",
+  "d408c893174b173e": "Model profile not saved",
+  "eb98c881cb83d040": "Model profiles",
+  "7401591f7ba4f5f8": "Off (choose models manually)",
+  "362abbcde1e354c6": "Manage model profiles…",
+  "0a01750c55a396d5": "Switch model profile",
+  "a798a7954dfbbf6a": "Think: {think} · Execute: {execute}",
+  "a5b0ddaa5ac931ae": "New profile",
+  "7ed1c863574d9d6a": "Rename {profile}"
 }

@@ -81,4 +81,40 @@ describe("resolveComposerControlsOwnership", () => {
     expect(result.overflowShowsPermissions).toBe(true);
     expect(result.overflowShowsPhase).toBe(true);
   });
+
+  it("keeps the profile switch in the overflow menu when no profile is active", () => {
+    const result = resolveComposerControlsOwnership({
+      ...base,
+      showProfile: true,
+      measuredHiddenBlockCount: 1,
+    });
+    expect(result.hiddenBlockIds).toEqual(["profile"]);
+    expect(result.overflowShowsProfile).toBe(true);
+    expect(result.overflowShowsPhase).toBe(false);
+  });
+
+  it("overflows the profile switch before the phase control", () => {
+    const result = resolveComposerControlsOwnership({
+      ...base,
+      showPhase: true,
+      showProfile: true,
+      measuredHiddenBlockCount: 1,
+    });
+    expect(result.hiddenBlockIds).toEqual(["profile"]);
+    expect(result.overflowShowsPhase).toBe(false);
+  });
+
+  it("puts all three blocks in the overflow menu when none fits", () => {
+    const result = resolveComposerControlsOwnership({
+      ...base,
+      matchesDefault: false,
+      showPhase: true,
+      showProfile: true,
+      measuredHiddenBlockCount: 3,
+    });
+    expect(result.hiddenBlockIds).toEqual(["mode", "phase", "profile"]);
+    expect(result.overflowShowsPermissions).toBe(true);
+    expect(result.overflowShowsPhase).toBe(true);
+    expect(result.overflowShowsProfile).toBe(true);
+  });
 });

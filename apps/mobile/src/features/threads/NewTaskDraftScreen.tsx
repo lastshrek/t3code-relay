@@ -1072,6 +1072,7 @@ export function NewTaskDraftScreen(props: {
         }}
         canOperateThread={canOperate}
         onChangeInteractionMode={flow.setInteractionMode}
+        onSelectModelProfile={flow.setActiveModelProfile}
         selectedThread={thread}
         selectedThreadDetailRef={null}
         contentPresentation={{ kind: "ready" }}

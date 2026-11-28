@@ -3,7 +3,7 @@ import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
 import { T, useGT, useMessages } from "gt-react";
-import { CircleAlertIcon } from "lucide-react";
+import { ChevronDownIcon, CircleAlertIcon, LayersIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerControl } from "./ComposerControl";
 import {
@@ -13,6 +13,7 @@ import {
 } from "./ComposerFooterControls";
 import {
   type EnvironmentId,
+  type ModelProfile,
   type ModelSelection,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -23,6 +24,18 @@ import {
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  Menu,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
+import { useComposerMenuProps } from "./composerEventScope";
+import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { resolveComposerTraitsInput } from "./composerProviderState";
 import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -82,6 +95,97 @@ function ComposerPhaseControl({
   );
 }
 
+function ComposerModelProfileControl({
+  profiles,
+  activeProfileId,
+  canChange,
+  modelOptionsByInstance,
+  providerInstanceEntries,
+  onSelect,
+  onManage,
+}: {
+  readonly profiles: ReadonlyArray<ModelProfile>;
+  readonly activeProfileId: string;
+  readonly canChange: boolean;
+  readonly modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>;
+  readonly providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  readonly onSelect: (profileId: string) => void;
+  readonly onManage?: (() => void) | undefined;
+}) {
+  const gt = useGT();
+  const composerFloatingLayerProps = useComposerMenuProps();
+  const active = profiles.find((profile) => profile.id === activeProfileId);
+  const modelLabel = (selection: ModelSelection | undefined) => {
+    if (!selection) return gt("None");
+    const driverKind = providerInstanceEntries.find(
+      (entry) => entry.instanceId === selection.instanceId,
+    )?.driverKind;
+    const option = resolveModelPickerSelectedModel({
+      driverKind,
+      model: selection.model,
+      options: modelOptionsByInstance.get(selection.instanceId) ?? [],
+    });
+    return option?.name ?? option?.shortName ?? selection.model;
+  };
+  return (
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex" />}>
+          <MenuTrigger
+            render={
+              <button
+                type="button"
+                aria-label={gt("Switch model profile")}
+                className={cn(
+                  "flex h-6 shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 text-xs font-medium text-muted-foreground outline-none hover:text-foreground",
+                  "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                )}
+              />
+            }
+          >
+            <LayersIcon className="size-3.5" />
+            {active ? <span className="max-w-16 truncate opacity-70">{active.name}</span> : null}
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </MenuTrigger>
+        </TooltipTrigger>
+        <TooltipPopup side="top">{gt("Switch model profile")}</TooltipPopup>
+      </Tooltip>
+      <MenuPopup side="top" align="end" {...composerFloatingLayerProps}>
+        <MenuGroupLabel>
+          <T>Model profiles</T>
+        </MenuGroupLabel>
+        <MenuRadioGroup value={activeProfileId} onValueChange={onSelect}>
+          {profiles.map((profile) => (
+            <MenuRadioItem key={profile.id} value={profile.id} disabled={!canChange}>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">{profile.name}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {gt("Think: {think} · Execute: {execute}", {
+                    think: modelLabel(profile.thinkModels[0]),
+                    execute: modelLabel(profile.executeModels[0]),
+                  })}
+                </span>
+              </span>
+            </MenuRadioItem>
+          ))}
+          <MenuSeparator />
+          <MenuRadioItem value="" disabled={!canChange}>
+            <T>Off (choose models manually)</T>
+          </MenuRadioItem>
+        </MenuRadioGroup>
+        {onManage ? (
+          <>
+            <MenuSeparator />
+            <MenuItem onClick={onManage}>
+              <T>Manage model profiles…</T>
+            </MenuItem>
+          </>
+        ) : null}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
 export function ComposerControlsBar(props: {
   environmentId: EnvironmentId;
   workspaceCwd: string | null;
@@ -133,6 +237,11 @@ export function ComposerControlsBar(props: {
   interactionMode?: ProviderInteractionMode;
   onInteractionModeChange?: (mode: ProviderInteractionMode) => void;
   activeProfileName?: string;
+  modelProfiles?: ReadonlyArray<ModelProfile> | undefined;
+  activeModelProfileId?: string | undefined;
+  canChangeModelProfile?: boolean | undefined;
+  onSelectModelProfile?: ((profileId: string) => void) | undefined;
+  onManageModelProfiles?: (() => void) | undefined;
 }) {
   const {
     environmentId,
@@ -180,6 +289,9 @@ export function ComposerControlsBar(props: {
   } = props;
   const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
   const showPhase = Boolean(props.interactionMode && props.onInteractionModeChange);
+  const showProfile = Boolean(
+    props.modelProfiles && props.modelProfiles.length > 0 && props.onSelectModelProfile,
+  );
   const {
     accessDisplay,
     showModeBlock,
@@ -187,12 +299,14 @@ export function ComposerControlsBar(props: {
     hiddenBlockIds: hiddenRestingBlockIds,
     overflowShowsPermissions,
     overflowShowsPhase,
+    overflowShowsProfile,
     pickerOwnsModeShortcut,
   } = resolveComposerControlsOwnership({
     matchesDefault: accessMatchesDefault || props.permissionsShownInStrip,
     collapsed: composerControlsCollapsed,
     measuredHiddenBlockCount,
     showPhase,
+    showProfile,
   });
   const controlSize = composerControlsCollapsed ? "xs" : "sm";
   const gt = useGT();
@@ -242,6 +356,24 @@ export function ComposerControlsBar(props: {
                 mode={props.interactionMode}
                 profileName={props.activeProfileName}
                 onChange={props.onInteractionModeChange}
+              />
+            ),
+          },
+        ]
+      : []),
+    ...(showProfile && props.onSelectModelProfile
+      ? [
+          {
+            id: "profile",
+            content: (
+              <ComposerModelProfileControl
+                profiles={props.modelProfiles ?? []}
+                activeProfileId={props.activeModelProfileId ?? ""}
+                canChange={props.canChangeModelProfile ?? false}
+                modelOptionsByInstance={modelOptionsByInstance}
+                providerInstanceEntries={providerInstanceEntries}
+                onSelect={props.onSelectModelProfile}
+                onManage={props.onManageModelProfiles}
               />
             ),
           },
@@ -374,8 +506,14 @@ export function ComposerControlsBar(props: {
             showPhase={overflowShowsPhase}
             interactionMode={props.interactionMode}
             activeProfileName={props.activeProfileName}
+            showProfile={overflowShowsProfile}
+            modelProfiles={props.modelProfiles}
+            activeModelProfileId={props.activeModelProfileId}
+            canChangeModelProfile={props.canChangeModelProfile}
             onRuntimeModeChange={handleRuntimeModeChange}
             onInteractionModeChange={props.onInteractionModeChange}
+            onSelectModelProfile={props.onSelectModelProfile}
+            onManageModelProfiles={props.onManageModelProfiles}
           />
         </div>
       </>
